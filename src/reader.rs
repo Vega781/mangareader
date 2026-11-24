@@ -209,13 +209,58 @@ pub fn load_md_chapters(
     ratings: &[String],
 ) -> Result<Vec<ChapterRef>, String> {
     let chapters = mangadex::fetch_chapters(id, langs, ratings)?;
-    Ok(chapters
+
+    // Deduplicate: one entry per chapter number, translation chosen by the
+    // language priority from settings (first = preferred). Different scanlation
+    // groups in the same language: keep the one with the most pages.
+    let mut best: std::collections::HashMap<String, mangadex::Chapter> =
+        std::collections::HashMap::new();
+    for c in chapters {
+        let key = match c.number {
+            Some(n) => format!("n:{}", crate::mangadex::format_num(n)),
+            None => format!("t:{}", c.label),
+        };
+        let prio = langs
+            .iter()
+            .position(|l| l.eq_ignore_ascii_case(&c.lang))
+            .unwrap_or(999);
+        let replace = match best.get(&key) {
+            None => true,
+            Some(cur) => {
+                let cur_prio = langs
+                    .iter()
+                    .position(|l| l.eq_ignore_ascii_case(&cur.lang))
+                    .unwrap_or(999);
+                if prio != cur_prio {
+                    prio < cur_prio
+                } else {
+                    c.pages > cur.pages
+                }
+            }
+        };
+        if replace {
+            best.insert(key, c);
+        }
+    }
+
+    let mut chosen: Vec<mangadex::Chapter> = best.into_values().collect();
+    chosen.sort_by(|a, b| {
+        a.number
+            .unwrap_or(f64::NEG_INFINITY)
+            .partial_cmp(&b.number.unwrap_or(f64::NEG_INFINITY))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    Ok(chosen
         .into_iter()
-        .map(|c| ChapterRef {
-            key: format!("md:{}", c.id),
-            label: c.label,
-            source: ChapterSource::Mangadex { id: c.id },
-            total_pages: c.pages,
+        .map(|c| {
+            let tag = c.lang.to_uppercase();
+            ChapterRef {
+                key: format!("md:{}", c.id),
+                label: format!("{} [{}]", c.label, tag),
+                source: ChapterSource::Mangadex { id: c.id },
+                total_pages: c.pages,
+            }
         })
         .collect())
 }

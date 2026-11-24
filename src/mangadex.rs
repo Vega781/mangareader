@@ -201,6 +201,10 @@ pub fn fetch_chapters(manga_id: &str, langs: &[String], ratings: &[String]) -> R
     Ok(out)
 }
 
+pub fn format_num(n: f64) -> String {
+    trim_num(n)
+}
+
 fn trim_num(n: f64) -> String {
     let s = format!("{n}");
     s.trim_end_matches('0').trim_end_matches('.').to_string()
