@@ -1,4 +1,6 @@
 //! All screens except the reader: library, search, detail, history, settings.
+use std::cell::Cell;
+
 use eframe::egui::{self, Sense};
 
 use crate::app::{cover_task, truncate, App, Screen};
@@ -175,29 +177,37 @@ impl App {
                             Some(e) => e,
                             None => continue,
                         };
-                        let mut inner_clicked = false;
+                        let cover_click = Cell::new(false);
+                        let inner_clicked = Cell::new(false);
                         let pair = cover_task(&entry, &self.data_dir);
-                        let cover_resp = self.draw_cover(ui, pair, egui::vec2(card_w, card_w * 1.42));
                         ui.vertical(|ui| {
                             ui.set_width(card_w);
+                            let resp = self.draw_cover(ui, pair, egui::vec2(card_w, card_w * 1.42));
+                            if resp.clicked() {
+                                cover_click.set(true);
+                            }
                             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                             ui.label(egui::RichText::new(truncate(&entry.title, 24)).strong());
                             if let Some(p) = entry.progress_percent() {
-                                ui.add(egui::ProgressBar::new(p / 100.0).show_percentage().desired_width(card_w));
+                                ui.monospace(egui::RichText::new(format!(
+                                    "[{}] {:.0}%",
+                                    crate::app::text_bar(p / 100.0, 16),
+                                    p
+                                )));
                             }
                             ui.horizontal(|ui| {
                                 if ui.small_button("Читать").clicked() {
-                                    inner_clicked = true;
+                                    inner_clicked.set(true);
                                     let hint = entry.last_chapter.clone();
                                     open_reader = Some((entry.id.clone(), hint));
                                 }
-                                if ui.small_button("✕").clicked() {
-                                    inner_clicked = true;
+                                if ui.small_button("[X]").clicked() {
+                                    inner_clicked.set(true);
                                     to_remove = Some(entry.id.clone());
                                 }
                             });
                         });
-                        if cover_resp.clicked() && !inner_clicked {
+                        if cover_click.get() && !inner_clicked.get() {
                             open_detail = Some(entry.id.clone());
                         }
                     }
@@ -304,22 +314,30 @@ impl App {
                             ui.end_row();
                         }
                         let id = format!("md:{}", s.id);
-                        let mut inner_clicked = false;
+                        let cover_click = Cell::new(false);
+                        let inner_clicked = Cell::new(false);
                         let pair = self.cover_from_summary(s);
-                        let cover_resp = self.draw_cover(ui, pair, egui::vec2(card_w, card_w * 1.42));
                         ui.vertical(|ui| {
                             ui.set_width(card_w);
+                            let resp = self.draw_cover(ui, pair, egui::vec2(card_w, card_w * 1.42));
+                            if resp.clicked() {
+                                cover_click.set(true);
+                            }
                             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                             ui.label(egui::RichText::new(truncate(&s.title, 24)).strong());
                             ui.horizontal(|ui| {
                                 let in_lib = self.lib.contains(&id);
-                                if ui.small_button(if in_lib { "✓ В библиотеке" } else { "+ Добавить" }).clicked() {
-                                    inner_clicked = true;
+                                if ui
+                                    .small_button(if in_lib { "[+]" } else { "[+ Добавить]" })
+                                    .on_hover_text(if in_lib { "Убрать из библиотеки" } else { "Добавить в библиотеку" })
+                                    .clicked()
+                                {
+                                    inner_clicked.set(true);
                                     toggled = Some(s.clone());
                                 }
                             });
                         });
-                        if cover_resp.clicked() && !inner_clicked {
+                        if cover_click.get() && !inner_clicked.get() {
                             open_detail = Some((id, s.clone()));
                         }
                     }
@@ -557,16 +575,13 @@ impl App {
                                     _ => false,
                                 })
                                 .count() as f32;
-                            ui.add(
-                                egui::ProgressBar::new(done_ch / total_ch)
-                                    .desired_width(320.0)
-                                    .text(format!(
-                                        "Всего: {:.0}% ({} из {} глав)",
-                                        100.0 * done_ch / total_ch,
-                                        done_ch as usize,
-                                        chapters.len()
-                                    )),
-                            );
+                            ui.monospace(egui::RichText::new(format!(
+                                "[{}] Всего: {:.0}% ({} из {} глав)",
+                                crate::app::text_bar(done_ch / total_ch, 20),
+                                100.0 * done_ch / total_ch,
+                                done_ch as usize,
+                                chapters.len()
+                            )));
                             // current chapter progress
                             let running: Option<crate::downloads::ChapterProgress> = chapters
                                 .iter()
@@ -580,21 +595,15 @@ impl App {
                                 });
                             if let Some(pr) = running {
                                 if pr.total > 0 {
-                                    ui.add(
-                                        egui::ProgressBar::new(pr.frac())
-                                            .desired_width(320.0)
-                                            .text(format!(
-                                                "Текущая глава: {} / {} стр.{}",
-                                                pr.done,
-                                                pr.total,
-                                                if pr.failed { " (ошибка сети, повтор…)" } else { "" }
-                                            )),
-                                    );
+                                    ui.monospace(egui::RichText::new(format!(
+                                        "[{}] Текущая глава: {} / {} стр.{}",
+                                        crate::app::text_bar(pr.frac(), 20),
+                                        pr.done,
+                                        pr.total,
+                                        if pr.failed { " (ошибка сети, повтор…)" } else { "" }
+                                    )));
                                 } else {
-                                    ui.horizontal(|ui| {
-                                        ui.spinner();
-                                        ui.label("Подготовка главы…");
-                                    });
+                                    ui.label("Подготовка главы…");
                                 }
                             }
                             ui.label(format!("В очереди осталось: {} глав", queued));
@@ -674,14 +683,15 @@ impl App {
                             if busy {
                                 match self.downloads.progress(cid) {
                                     Some(pr) if pr.total > 0 => {
-                                        ui.add(
-                                            egui::ProgressBar::new(pr.frac())
-                                                .desired_width(110.0)
-                                                .text(format!("{}/{}", pr.done, pr.total)),
-                                        );
+                                        ui.monospace(egui::RichText::new(format!(
+                                            "[{}] {}/{}",
+                                            crate::app::text_bar(pr.frac(), 10),
+                                            pr.done,
+                                            pr.total
+                                        )));
                                     }
                                     _ => {
-                                        ui.spinner();
+                                        ui.label("подготовка…");
                                     }
                                 }
                             } else if queued {

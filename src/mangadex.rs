@@ -101,7 +101,7 @@ fn parse_manga_list(v: Value) -> Result<(Vec<MangaSummary>, u32), String> {
 
 pub fn search(query: &str, offset: u32) -> Result<(Vec<MangaSummary>, u32), String> {
     let url = format!(
-        "{API}/manga?title={}&limit=24&offset={}&includes[]=cover_art&contentRating[]=safe&contentRating[]=suggestive&hasAvailableChapters=true&order[relevance]=desc",
+        "{API}/manga?title={}&limit=24&offset={}&includes[]=cover_art&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&hasAvailableChapters=true&order[relevance]=desc",
         encode_param(query),
         offset
     );
@@ -110,7 +110,7 @@ pub fn search(query: &str, offset: u32) -> Result<(Vec<MangaSummary>, u32), Stri
 
 pub fn popular(offset: u32) -> Result<(Vec<MangaSummary>, u32), String> {
     let url = format!(
-        "{API}/manga?limit=24&offset={}&includes[]=cover_art&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive&hasAvailableChapters=true",
+        "{API}/manga?limit=24&offset={}&includes[]=cover_art&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&hasAvailableChapters=true",
         offset
     );
     parse_manga_list(net::get_json(&url)?)

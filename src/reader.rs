@@ -501,14 +501,15 @@ pub fn show(
                                 // live progress of the running download
                                 match dl.progress(id) {
                                     Some(pr) if pr.total > 0 => {
-                                        ui.add(
-                                            egui::ProgressBar::new(pr.frac())
-                                                .desired_width(130.0)
-                                                .text(format!("{}/{} стр.", pr.done, pr.total)),
-                                        );
+                                        ui.monospace(egui::RichText::new(format!(
+                                            "[{}] {}/{} стр.",
+                                            crate::app::text_bar(pr.frac(), 12),
+                                            pr.done,
+                                            pr.total
+                                        )));
                                     }
                                     _ => {
-                                        ui.spinner();
+                                        ui.label("подготовка…");
                                     }
                                 }
                                 false

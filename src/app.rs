@@ -179,6 +179,7 @@ impl App {
 
     pub fn open_detail(&mut self, manga_id: String, known: Option<MangaSummary>) {
         let entry = self.lib.entry(&manga_id).cloned();
+        let known_id = known.as_ref().map(|s| s.id.clone());
         let mut ds = DetailState {
             manga_id: manga_id.clone(),
             summary: known,
@@ -186,31 +187,38 @@ impl App {
             chapters: Vec::new(),
             ch_job: None,
         };
-        match entry.as_ref().map(|e| &e.source) {
-            Some(library::MangaSource::Mangadex { id }) => {
-                if ds.summary.is_none() {
-                    let id2 = id.clone();
-                    ds.sum_job = Some(Job::spawn(move || mangadex::details(&id2)));
-                }
+        // md uuid: from library entry, or from the known search summary
+        let md_uuid: Option<String> = match entry.as_ref().map(|e| &e.source) {
+            Some(library::MangaSource::Mangadex { id }) => Some(id.clone()),
+            _ => known_id,
+        };
+        if let Some(id) = md_uuid {
+            // MangaDex manga (in library or just opened from search)
+            if ds.summary.is_none() {
                 let id2 = id.clone();
-                let langs = self.lib.settings.languages.clone();
-                let ratings = self.lib.settings.content_ratings.clone();
-                ds.ch_job = Some(Job::spawn(move || reader::load_md_chapters(&id2, &langs, &ratings)));
+                ds.sum_job = Some(Job::spawn(move || mangadex::details(&id2)));
             }
-            Some(library::MangaSource::Local { path }) => {
-                let p = PathBuf::from(path);
-                ds.ch_job = Some(Job::spawn(move || reader::load_local_chapters(&p)));
-                if ds.summary.is_none() {
-                    ds.summary = Some(MangaSummary {
-                        id: manga_id.clone(),
-                        title: entry.as_ref().map(|e| e.title.clone()).unwrap_or_default(),
-                        cover_url: None,
-                        status: String::new(),
-                        description: entry.as_ref().map(|e| e.description.clone()).unwrap_or_default(),
-                    });
-                }
+            let id2 = id.clone();
+            let langs = self.lib.settings.languages.clone();
+            let ratings = self.lib.settings.content_ratings.clone();
+            ds.ch_job = Some(Job::spawn(move || reader::load_md_chapters(&id2, &langs, &ratings)));
+        } else if let Some(library::MangaSource::Local { path }) =
+            entry.as_ref().map(|e| &e.source)
+        {
+            let p = PathBuf::from(path);
+            ds.ch_job = Some(Job::spawn(move || reader::load_local_chapters(&p)));
+            if ds.summary.is_none() {
+                ds.summary = Some(MangaSummary {
+                    id: manga_id.clone(),
+                    title: entry.as_ref().map(|e| e.title.clone()).unwrap_or_default(),
+                    cover_url: None,
+                    status: String::new(),
+                    description: entry
+                        .as_ref()
+                        .map(|e| e.description.clone())
+                        .unwrap_or_default(),
+                });
             }
-            None => {}
         }
         self.detail = Some(ds);
         self.screen = Screen::Detail(manga_id);
@@ -464,6 +472,22 @@ fn command_exists(cmd: &str) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+/// ASCII text progress bar, e.g. "[██████░░░░░░░░░░]".
+pub fn text_bar(frac: f32, width: usize) -> String {
+    let frac = frac.clamp(0.0, 1.0);
+    let fill = (frac * width as f32).round() as usize;
+    let fill = fill.min(width);
+    let mut out = String::with_capacity(width);
+    for i in 0..width {
+        if i < fill {
+            out.push('\u{2588}'); // full block
+        } else {
+            out.push('\u{2591}'); // light shade
+        }
+    }
+    out
 }
 
 pub fn truncate(s: &str, n: usize) -> String {
