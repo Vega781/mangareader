@@ -534,7 +534,7 @@ impl App {
                                 .map(|c| c.total_pages)
                                 .unwrap_or(0);
                             let downloaded = if expected > 0 {
-                                crate::downloads::is_complete(&self.data_dir, cid, expected)
+                                self.chapter_complete(cid, expected)
                             } else {
                                 entry
                                     .as_ref()
@@ -570,7 +570,7 @@ impl App {
                                 .iter()
                                 .filter(|c| match &c.source {
                                     ChapterSource::Mangadex { id: cid } => {
-                                        crate::downloads::is_complete(&self.data_dir, cid, c.total_pages)
+                                        self.chapter_complete(cid, c.total_pages)
                                     }
                                     _ => false,
                                 })
@@ -610,6 +610,7 @@ impl App {
                         });
                         if ui.button("Остановить").clicked() {
                             self.downloads.stop_all();
+                            self.invalidate_dl_cache();
                             self.toast("Скачивание остановлено".into(), false);
                         }
                     }
@@ -617,7 +618,7 @@ impl App {
                         .iter()
                         .filter(|c| match &c.source {
                             ChapterSource::Mangadex { id: cid } => {
-                                crate::downloads::is_complete(&self.data_dir, cid, c.total_pages)
+                                self.chapter_complete(cid, c.total_pages)
                             }
                             _ => false,
                         })
@@ -674,7 +675,7 @@ impl App {
                         }
                         if let ChapterSource::Mangadex { id: cid } = &ch.source {
                             let got = if ch.total_pages > 0 {
-                                crate::downloads::is_complete(&self.data_dir, cid, ch.total_pages)
+                                self.chapter_complete(cid, ch.total_pages)
                             } else {
                                 crate::downloads::is_downloaded(&self.data_dir, cid)
                             };
@@ -787,6 +788,7 @@ impl App {
         }
         // drop any queued/running job for this chapter
         self.downloads.remove_chapter(chapter_id);
+        self.invalidate_dl_cache();
         self.save_needed = true;
         existed
     }

@@ -78,6 +78,8 @@ pub struct App {
     pub save_needed: bool,
     pub local_path_input: String,
     pub dialog_job: Option<Job<Result<String, String>>>,
+    /// cache of per-chapter "downloaded & complete" checks (fs scan is slow on Windows)
+    pub dl_cache: std::cell::RefCell<std::collections::HashMap<String, (Instant, bool)>>,
 }
 
 impl App {
@@ -98,6 +100,7 @@ impl App {
             save_needed: false,
             local_path_input: String::new(),
             dialog_job: None,
+            dl_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
         };
         app.setup_visuals(&cc.egui_ctx);
         app
@@ -166,6 +169,28 @@ impl App {
         .into();
         ctx.set_style(style);
         ctx.set_theme(egui::Theme::Dark);
+    }
+
+    /// Cached per-chapter completeness check (re-scans the disk at most
+    /// once per 2 seconds per chapter instead of every frame).
+    pub fn chapter_complete(&self, chapter_id: &str, expected: u32) -> bool {
+        if expected == 0 {
+            return crate::downloads::is_downloaded(&self.data_dir, chapter_id);
+        }
+        let mut cache = self.dl_cache.borrow_mut();
+        if let Some((at, v)) = cache.get(chapter_id) {
+            if at.elapsed() < Duration::from_secs(2) {
+                return *v;
+            }
+        }
+        let v = crate::downloads::is_complete(&self.data_dir, chapter_id, expected);
+        cache.insert(chapter_id.to_string(), (Instant::now(), v));
+        v
+    }
+
+    /// Forget cached completeness checks (after downloads finish or files are deleted).
+    pub fn invalidate_dl_cache(&mut self) {
+        self.dl_cache.borrow_mut().clear();
     }
 
     pub fn toast(&mut self, msg: String, error: bool) {
@@ -349,7 +374,11 @@ impl App {
 
     fn poll_downloads(&mut self) {
         let had_queue = self.downloads.active() + self.downloads.pending() > 1;
-        for (chapter_id, manga_id, res) in self.downloads.poll(&self.data_dir) {
+        let results = self.downloads.poll(&self.data_dir);
+        if !results.is_empty() {
+            self.invalidate_dl_cache();
+        }
+        for (chapter_id, manga_id, res) in results {
             match res {
                 Ok(()) => {
                     if let Some(e) = self.lib.entry_mut(&manga_id) {
