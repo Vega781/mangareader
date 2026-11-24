@@ -36,6 +36,26 @@ pub fn is_downloaded(data_dir: &Path, chapter_id: &str) -> bool {
             .unwrap_or(false)
 }
 
+/// Number of saved page files for a chapter.
+pub fn page_files(data_dir: &Path, chapter_id: &str) -> usize {
+    let dir = chapter_dir(data_dir, chapter_id);
+    if !dir.is_dir() {
+        return 0;
+    }
+    std::fs::read_dir(&dir)
+        .map(|d| {
+            d.filter_map(|e| e.ok())
+                .filter(|e| e.path().is_file())
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// True when the chapter has at least `expected` pages on disk.
+pub fn is_complete(data_dir: &Path, chapter_id: &str, expected: u32) -> bool {
+    expected > 0 && page_files(data_dir, chapter_id) >= expected as usize
+}
+
 impl Downloads {
     pub fn queued(&self, chapter_id: &str) -> bool {
         self.queue.iter().any(|(id, _)| id == chapter_id)
@@ -58,6 +78,12 @@ impl Downloads {
 
     pub fn clear_queue(&mut self) {
         self.queue.clear();
+    }
+
+    /// Drop queued/running job for a chapter (e.g. after deletion).
+    pub fn remove_chapter(&mut self, chapter_id: &str) {
+        self.queue.retain(|(id, _)| id != chapter_id);
+        self.jobs.remove(chapter_id);
     }
 
     /// Start next queued download when no job is active.
@@ -123,12 +149,18 @@ fn download_chapter(chapter_id: &str, data_dir: &Path) -> Result<(), String> {
     let dir = chapter_dir(data_dir, chapter_id);
     std::fs::create_dir_all(&dir).map_err(|e| format!("Не удалось создать папку загрузки: {e}"))?;
     for (i, page) in pages.iter().enumerate() {
-        let url = mangadex::page_url(&base, &hash, page);
-        let bytes =
-            crate::net::get_bytes(&url).map_err(|e| format!("Страница {}: {e}", i + 1))?;
         let ext = page.rsplit('.').next().unwrap_or("jpg");
         let name = format!("{:04}.{}", i + 1, ext.to_ascii_lowercase());
-        std::fs::write(dir.join(name), &bytes)
+        let path = dir.join(&name);
+        // resume: skip pages already on disk
+        let have = std::fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false);
+        if have {
+            continue;
+        }
+        let url = mangadex::page_url(&base, &hash, page);
+        let bytes = crate::net::get_bytes_retry(&url, 3)
+            .map_err(|e| format!("Страница {}: {e}", i + 1))?;
+        std::fs::write(&path, &bytes)
             .map_err(|e| format!("Не удалось записать страницу: {e}"))?;
         // be gentle with the API (its ToS asks for delays between requests)
         std::thread::sleep(std::time::Duration::from_millis(300));

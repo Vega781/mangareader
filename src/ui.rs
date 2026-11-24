@@ -418,6 +418,8 @@ impl App {
         let mut toggle_lib = false;
         let mut open_reader_ch: Option<String> = None;
         let mut remove_bookmark: Option<usize> = None;
+        let mut delete_chapter: Option<String> = None;
+        let mut delete_all_downloaded = false;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -509,11 +511,22 @@ impl App {
                     .iter()
                     .filter_map(|c| match &c.source {
                         ChapterSource::Mangadex { id: cid } => {
-                            let downloaded = entry
-                                .as_ref()
-                                .map(|e| e.downloaded.contains(cid))
-                                .unwrap_or(false)
-                                || crate::downloads::is_downloaded(&self.data_dir, cid);
+                            let expected = chapters
+                                .iter()
+                                .find(|c| {
+                                    matches!(&c.source, ChapterSource::Mangadex { id: x } if x == cid)
+                                })
+                                .map(|c| c.total_pages)
+                                .unwrap_or(0);
+                            let downloaded = if expected > 0 {
+                                crate::downloads::is_complete(&self.data_dir, cid, expected)
+                            } else {
+                                entry
+                                    .as_ref()
+                                    .map(|e| e.downloaded.contains(cid))
+                                    .unwrap_or(false)
+                                    || crate::downloads::is_downloaded(&self.data_dir, cid)
+                            };
                             if downloaded || self.downloads.running(cid) || self.downloads.queued(cid) {
                                 None
                             } else {
@@ -541,6 +554,22 @@ impl App {
                             self.downloads.clear_queue();
                             self.toast("Очередь очищена (текущая глава докачается)".into(), false);
                         }
+                    }
+                    let downloaded_count = chapters
+                        .iter()
+                        .filter(|c| match &c.source {
+                            ChapterSource::Mangadex { id: cid } => {
+                                crate::downloads::is_complete(&self.data_dir, cid, c.total_pages)
+                            }
+                            _ => false,
+                        })
+                        .count();
+                    if downloaded_count > 0
+                        && ui
+                            .button(format!("Удалить скачанные ({})", downloaded_count))
+                            .clicked()
+                    {
+                        delete_all_downloaded = true;
                     }
                 });
                 ui.add_space(4.0);
@@ -588,7 +617,11 @@ impl App {
                             ui.label(egui::RichText::new(format!("{} стр.", ch.total_pages)).weak());
                         }
                         if let ChapterSource::Mangadex { id: cid } = &ch.source {
-                            let got = crate::downloads::is_downloaded(&self.data_dir, cid);
+                            let got = if ch.total_pages > 0 {
+                                crate::downloads::is_complete(&self.data_dir, cid, ch.total_pages)
+                            } else {
+                                crate::downloads::is_downloaded(&self.data_dir, cid)
+                            };
                             let busy = self.downloads.running(cid);
                             let queued = self.downloads.queued(cid);
                             if busy {
@@ -596,7 +629,9 @@ impl App {
                             } else if queued {
                                 ui.label(egui::RichText::new("в очереди").weak());
                             } else if got {
-                                crate::icons::button_sized(ui, crate::icons::Icon::Check, "Глава скачана, доступна офлайн", 22.0);
+                                if crate::icons::button_sized(ui, crate::icons::Icon::Trash, "Удалить скачанную главу", 22.0).clicked() {
+                                    delete_chapter = Some(cid.clone());
+                                }
                             } else if crate::icons::button_sized(ui, crate::icons::Icon::Download, "Скачать главу", 22.0).clicked() {
                                 self.downloads.start(cid, id.to_string(), self.data_dir.clone());
                                 self.toast("Загрузка главы началась".into(), false);
@@ -639,6 +674,45 @@ impl App {
                 }
             }
         }
+        if let Some(cid) = delete_chapter {
+            self.delete_downloaded_chapter(id, &cid);
+        }
+        if delete_all_downloaded {
+            let cids: Vec<String> = chapters
+                .iter()
+                .filter_map(|c| match &c.source {
+                    ChapterSource::Mangadex { id: cid } => Some(cid.clone()),
+                    _ => None,
+                })
+                .collect();
+            let mut removed = 0;
+            for cid in cids {
+                if self.delete_downloaded_chapter(id, &cid) {
+                    removed += 1;
+                }
+            }
+            self.toast(format!("Удалено скачанных глав: {removed}"), false);
+        }
+    }
+
+    /// Remove a downloaded chapter from disk and library metadata.
+    /// Returns true when something was actually deleted.
+    fn delete_downloaded_chapter(&mut self, manga_id: &str, chapter_id: &str) -> bool {
+        let dir = crate::downloads::chapter_dir(&self.data_dir, chapter_id);
+        let existed = dir.is_dir();
+        if existed {
+            if let Err(e) = std::fs::remove_dir_all(&dir) {
+                self.toast(format!("Не удалось удалить главу: {e}"), true);
+                return false;
+            }
+        }
+        if let Some(e) = self.lib.entry_mut(manga_id) {
+            e.downloaded.retain(|c| c != chapter_id);
+        }
+        // drop any queued/running job for this chapter
+        self.downloads.remove_chapter(chapter_id);
+        self.save_needed = true;
+        existed
     }
 
     // ---------- history ----------

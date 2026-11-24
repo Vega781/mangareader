@@ -23,6 +23,8 @@ pub enum Icon {
     Download,
     /// checkmark
     Check,
+    /// trash bin
+    Trash,
 }
 
 fn tri(ui: &mut Ui, apex: egui::Pos2, half_h: f32, back: f32, color: Color32) {
@@ -134,6 +136,49 @@ pub fn draw(ui: &mut Ui, icon: Icon, rect: egui::Rect, color: Color32) {
                 ],
                 egui::Stroke::new(sw, color),
             );
+        }
+        Icon::Trash => {
+            // lid
+            ui.painter().line_segment(
+                [
+                    egui::pos2(c.x - s * 1.0, c.y - s * 0.75),
+                    egui::pos2(c.x + s * 1.0, c.y - s * 0.75),
+                ],
+                stroke,
+            );
+            // handle
+            ui.painter().line_segment(
+                [
+                    egui::pos2(c.x - s * 0.35, c.y - s * 0.75),
+                    egui::pos2(c.x - s * 0.35, c.y - s * 1.05),
+                ],
+                stroke,
+            );
+            ui.painter().line_segment(
+                [
+                    egui::pos2(c.x + s * 0.35, c.y - s * 0.75),
+                    egui::pos2(c.x + s * 0.35, c.y - s * 1.05),
+                ],
+                stroke,
+            );
+            // body (trapezoid outline)
+            let body = vec![
+                egui::pos2(c.x - s * 0.85, c.y - s * 0.55),
+                egui::pos2(c.x + s * 0.85, c.y - s * 0.55),
+                egui::pos2(c.x + s * 0.65, c.y + s),
+                egui::pos2(c.x - s * 0.65, c.y + s),
+            ];
+            ui.painter().add(egui::Shape::line(body, stroke));
+            // ribs
+            for dx in [-0.3_f32, 0.0, 0.3] {
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(c.x + dx * s, c.y - s * 0.35),
+                        egui::pos2(c.x + dx * s * 0.85, c.y + s * 0.7),
+                    ],
+                    egui::Stroke::new(sw * 0.8, color),
+                );
+            }
         }
         Icon::Check => {
             p.add(egui::Shape::line(

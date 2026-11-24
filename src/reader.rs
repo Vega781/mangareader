@@ -239,9 +239,9 @@ pub fn load_local_chapters(path: &Path) -> Result<Vec<ChapterRef>, String> {
 fn load_pages(ch: &ChapterRef, data_dir: &Path) -> Result<Vec<ImgSource>, String> {
     match &ch.source {
         ChapterSource::Mangadex { id } => {
-            // offline first
             let dir = downloads::chapter_dir(data_dir, id);
-            if dir.is_dir() {
+            // fully downloaded (offline) -> use disk without touching the network
+            if ch.total_pages > 0 && downloads::is_complete(data_dir, id, ch.total_pages) {
                 let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
                     .map_err(|e| format!("Папка загрузки: {e}"))?
                     .filter_map(|e| e.ok().map(|e| e.path()))
@@ -250,18 +250,24 @@ fn load_pages(ch: &ChapterRef, data_dir: &Path) -> Result<Vec<ImgSource>, String
                 files.sort_by(|a, b| {
                     local::natural_cmp(local::file_name_of(a), local::file_name_of(b))
                 });
-                if !files.is_empty() {
-                    return Ok(files
-                        .into_iter()
-                        .map(|p| ImgSource::Page(local::PageSource::File(p)))
-                        .collect());
+                return Ok(files
+                    .into_iter()
+                    .map(|p| ImgSource::Page(local::PageSource::File(p)))
+                    .collect());
+            }
+            // otherwise: per-page hybrid — local file when present, network otherwise
+            let (base, hash, pages) = mangadex::at_home(id)?;
+            let mut out = Vec::with_capacity(pages.len());
+            for (i, p) in pages.iter().enumerate() {
+                let ext = p.rsplit('.').next().unwrap_or("jpg").to_ascii_lowercase();
+                let local = dir.join(format!("{:04}.{}", i + 1, ext));
+                if local.is_file() {
+                    out.push(ImgSource::Page(local::PageSource::File(local)));
+                } else {
+                    out.push(ImgSource::Url(mangadex::page_url(&base, &hash, p)));
                 }
             }
-            let (base, hash, pages) = mangadex::at_home(id)?;
-            Ok(pages
-                .iter()
-                .map(|p| ImgSource::Url(mangadex::page_url(&base, &hash, p)))
-                .collect())
+            Ok(out)
         }
         ChapterSource::Local(path) => Ok(local::chapter_pages(path)?
             .into_iter()
@@ -485,7 +491,11 @@ pub fn show(
                 }
                 if let Some(ch) = session.current_chapter() {
                     if let ChapterSource::Mangadex { id } = &ch.source {
-                        let got = downloads::is_downloaded(data_dir, id);
+                        let got = if ch.total_pages > 0 {
+                            downloads::is_complete(data_dir, id, ch.total_pages)
+                        } else {
+                            downloads::is_downloaded(data_dir, id)
+                        };
                         let busy = dl.running(id);
                         let (dl_icon, dl_text) = if busy {
                             (None, "Скачивание…")
