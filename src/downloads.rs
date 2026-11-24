@@ -10,9 +10,22 @@ use crate::jobs::Job;
 use crate::mangadex;
 
 /// How many pages of one chapter are downloaded concurrently.
-/// MangaDex tolerates a handful of parallel image requests; more is pointless
-/// because the bottleneck is the server, not the client.
-const PARALLEL_PAGES: usize = 4;
+/// Scaled from CPU cores: total parallel requests ≈ number of cores.
+fn pages_per_chapter() -> usize {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    (cores / max_active_chapters()).clamp(2, 4)
+}
+
+/// How many chapters are downloaded simultaneously.
+/// Auto-detected from CPU: cores count, bounded to 5..=10.
+pub fn max_active_chapters() -> usize {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    cores.clamp(5, 10)
+}
 
 /// Message returned when a download was cancelled by the user.
 pub const CANCELLED: &str = "Остановлено";
@@ -135,11 +148,12 @@ impl Downloads {
         let progress = self.progress.clone();
         let cancel = Arc::new(AtomicBool::new(false));
         self.cancels.insert(id.clone(), cancel.clone());
+        let par = pages_per_chapter();
         self.jobs.insert(
             id.clone(),
             DownloadJob {
                 manga_id,
-                job: Job::spawn(move || download_chapter(&id, &data_dir, progress, &cancel)),
+                job: Job::spawn(move || download_chapter(&id, &data_dir, progress, &cancel, par)),
             },
         );
     }
@@ -180,12 +194,13 @@ impl Downloads {
         }
     }
 
-    /// Start next queued download when no job is active.
+    /// Start queued downloads while below the parallel-chapter limit.
     fn maybe_start_next(&mut self, data_dir: &Path) {
-        if self.jobs.is_empty() {
-            if let Some((chapter_id, manga_id, total)) = self.queue.pop_front() {
-                self.start(&chapter_id, manga_id, total, data_dir.to_path_buf());
-            }
+        while self.jobs.len() < max_active_chapters() {
+            let Some((chapter_id, manga_id, total)) = self.queue.pop_front() else {
+                break;
+            };
+            self.start(&chapter_id, manga_id, total, data_dir.to_path_buf());
         }
     }
 
@@ -237,6 +252,7 @@ fn download_chapter(
     data_dir: &Path,
     progress: Arc<Mutex<HashMap<String, ChapterProgress>>>,
     cancel: &AtomicBool,
+    par: usize,
 ) -> Result<(), String> {
     let cancelled = || cancel.load(Ordering::Relaxed);
     if cancelled() {
@@ -262,7 +278,7 @@ fn download_chapter(
         let base = &base;
         let hash = &hash;
         let progress = &progress;
-        for _ in 0..PARALLEL_PAGES.min(pages.len().max(1)) {
+        for _ in 0..par.min(pages.len().max(1)) {
             let work = &work;
             let completed = &completed;
             let first_error = &first_error;
