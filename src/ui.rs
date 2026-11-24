@@ -17,10 +17,10 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.add_space(8.0);
                     for (screen, label) in [
-                        (Screen::Library, "📚 Библиотека"),
-                        (Screen::Search, "🔍 Поиск MangaDex"),
-                        (Screen::History, "🕘 История"),
-                        (Screen::Settings, "⚙ Настройки"),
+                        (Screen::Library, "Библиотека"),
+                        (Screen::Search, "Поиск MangaDex"),
+                        (Screen::History, "История"),
+                        (Screen::Settings, "Настройки"),
                     ] {
                         if ui
                             .selectable_label(self.screen == screen.clone(), label)
@@ -125,10 +125,10 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             ui.heading("Библиотека");
-            if ui.button("🔍 Поиск MangaDex").clicked() {
+            if ui.button("Поиск MangaDex >>").clicked() {
                 self.screen = Screen::Search;
             }
-            if ui.button("📂 Открыть CBZ/папку…").clicked() {
+            if ui.button("Открыть CBZ/папку…").clicked() {
                 self.browse_local();
             }
             ui.label("или путь:");
@@ -247,7 +247,7 @@ impl App {
                     .desired_width(360.0)
                     .hint_text("Название манги (пусто = популярное)"),
             );
-            if ui.button("🔍 Найти").clicked()
+            if ui.button("Найти").clicked()
                 || resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
             {
                 self.search.results.clear();
@@ -404,7 +404,7 @@ impl App {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            if crate::icons::button_with_text(ui, crate::icons::Icon::Prev, "Назад", false).clicked() {
+            if ui.button("<- Назад").clicked() {
                 self.screen = Screen::Library;
             }
             ui.heading(truncate(&summary_title, 50));
@@ -443,13 +443,10 @@ impl App {
                     }
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if crate::icons::button_with_text(ui, crate::icons::Icon::Next, "Читать", false).clicked() {
+                        if ui.button("> Читать").clicked() {
                             read_clicked = true;
                         }
-                        if entry_present
-                            && crate::icons::button_with_text(ui, crate::icons::Icon::Next, "Продолжить", false)
-                                .clicked()
-                        {
+                        if entry_present && ui.button(">> Продолжить").clicked() {
                             continue_clicked = true;
                         }
                         if has_summary {
@@ -646,24 +643,22 @@ impl App {
                             .as_ref()
                             .map(|e| e.finished.contains(&ch.key))
                             .unwrap_or(false);
-                        {
-                            let (dot_rect, _) =
-                                ui.allocate_exact_size(egui::vec2(14.0, 20.0), Sense::hover());
-                            let cc = dot_rect.center();
-                            let p = ui.painter();
-                            if finished {
-                                p.circle_filled(cc, 4.5, egui::Color32::from_rgb(90, 200, 120));
+                        ui.monospace(
+                            egui::RichText::new(if finished {
+                                "[x]"
                             } else if prog > 0 {
-                                p.circle_filled(cc, 4.5, egui::Color32::from_rgb(220, 180, 80));
-                                p.circle_filled(
-                                    cc + egui::vec2(1.5, 1.5),
-                                    3.0,
-                                    egui::Color32::from_rgb(18, 18, 24),
-                                );
+                                "[~]"
                             } else {
-                                p.circle_filled(cc, 3.0, egui::Color32::from_rgb(90, 90, 100));
-                            }
-                        }
+                                "[ ]"
+                            })
+                            .color(if finished {
+                                egui::Color32::from_rgb(90, 200, 120)
+                            } else if prog > 0 {
+                                egui::Color32::from_rgb(220, 180, 80)
+                            } else {
+                                egui::Color32::from_rgb(90, 90, 100)
+                            }),
+                        );
                         ui.label(truncate(&ch.label, 52));
                         if ch.total_pages > 0 {
                             ui.label(egui::RichText::new(format!("{} стр.", ch.total_pages)).weak());
@@ -692,10 +687,18 @@ impl App {
                             } else if queued {
                                 ui.label(egui::RichText::new("в очереди").weak());
                             } else if got {
-                                if crate::icons::button_sized(ui, crate::icons::Icon::Trash, "Удалить скачанную главу", 22.0).clicked() {
+                                if ui
+                                    .small_button("[X]")
+                                    .on_hover_text("Удалить скачанную главу")
+                                    .clicked()
+                                {
                                     delete_chapter = Some(cid.clone());
                                 }
-                            } else if crate::icons::button_sized(ui, crate::icons::Icon::Download, "Скачать главу", 22.0).clicked() {
+                            } else if ui
+                                .small_button("[DL]")
+                                .on_hover_text("Скачать главу")
+                                .clicked()
+                            {
                                 self.downloads.start(cid, id.to_string(), ch.total_pages, self.data_dir.clone());
                                 self.toast("Загрузка главы началась".into(), false);
                             }

@@ -1,7 +1,6 @@
 #![allow(clippy::collapsible_if)]
 mod app;
 mod downloads;
-mod icons;
 mod images;
 mod jobs;
 mod library;

@@ -104,13 +104,66 @@ impl App {
     }
 
     fn setup_visuals(&mut self, ctx: &egui::Context) {
+        // --- CLI look: monospace everywhere, flat terminal palette ---
+        let mut fonts = egui::FontDefinitions::default();
+        // Hack (bundled) becomes the main UI font => everything is monospace
+        if fonts.font_data.get("Hack").is_some() {
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "Hack".into());
+        }
+        ctx.set_fonts(fonts);
+
         let mut style = egui::Style::default();
         style.visuals = egui::Visuals::dark();
-        style.visuals.widgets.noninteractive.corner_radius = egui::Rounding::same(4);
-        style.visuals.widgets.inactive.corner_radius = egui::Rounding::same(6);
-        style.visuals.widgets.hovered.corner_radius = egui::Rounding::same(6);
-        style.visuals.panel_fill = egui::Color32::from_rgb(18, 18, 24);
-        style.visuals.extreme_bg_color = egui::Color32::from_rgb(10, 10, 14);
+        // terminal palette
+        let bg = egui::Color32::from_rgb(10, 12, 10);
+        let fg = egui::Color32::from_rgb(190, 200, 190);
+        let accent = egui::Color32::from_rgb(80, 220, 120);
+        let dim = egui::Color32::from_rgb(110, 120, 110);
+        style.visuals.panel_fill = bg;
+        style.visuals.window_fill = bg;
+        style.visuals.extreme_bg_color = egui::Color32::from_rgb(5, 6, 5);
+        style.visuals.faint_bg_color = egui::Color32::from_rgb(16, 20, 16);
+        style.visuals.override_text_color = Some(fg);
+        style.visuals.hyperlink_color = accent;
+        style.visuals.selection.bg_fill = egui::Color32::from_rgb(30, 70, 45);
+        style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
+        style.visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, fg);
+        style.visuals.widgets.noninteractive.bg_fill = bg;
+        style.visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, fg);
+        style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(22, 28, 22);
+        style.visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
+        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(30, 42, 32);
+        style.visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
+        style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(40, 60, 45);
+        // zero rounding, thin strokes — like a TUI
+        style.visuals.widgets.noninteractive.corner_radius = egui::Rounding::same(0);
+        style.visuals.widgets.inactive.corner_radius = egui::Rounding::same(0);
+        style.visuals.widgets.hovered.corner_radius = egui::Rounding::same(0);
+        style.visuals.widgets.active.corner_radius = egui::Rounding::same(0);
+        style.visuals.widgets.open.corner_radius = egui::Rounding::same(0);
+        style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 50, 40));
+        style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 50, 40));
+        style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 70, 55));
+        style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 220, 120));
+        style.visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 50, 40));
+        style.visuals.window_corner_radius = egui::Rounding::same(0);
+        style.visuals.menu_corner_radius = egui::Rounding::same(0);
+        style.spacing.item_spacing = egui::vec2(8.0, 4.0);
+        style.spacing.button_padding = egui::vec2(8.0, 2.0);
+        style.spacing.interact_size.y = 22.0;
+        style.text_styles = [
+            (egui::TextStyle::Heading, egui::FontId::monospace(17.0)),
+            (egui::TextStyle::Body, egui::FontId::monospace(14.0)),
+            (egui::TextStyle::Button, egui::FontId::monospace(14.0)),
+            (egui::TextStyle::Small, egui::FontId::monospace(12.0)),
+            (egui::TextStyle::Monospace, egui::FontId::monospace(14.0)),
+            (egui::TextStyle::Name("Heading2".into()), egui::FontId::monospace(15.0)),
+        ]
+        .into();
         ctx.set_style(style);
         ctx.set_theme(egui::Theme::Dark);
     }

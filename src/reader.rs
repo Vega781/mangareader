@@ -372,13 +372,11 @@ pub fn show(
 
     // ---- top bar ----
     TopBottomPanel::top("reader_top")
-        .frame(egui::Frame::default().fill(egui::Color32::from_rgb(24, 24, 30)))
+        .frame(egui::Frame::default().fill(egui::Color32::from_rgb(12, 14, 12)))
         .show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                if crate::icons::button_with_text(ui, crate::icons::Icon::Prev, "Библиотека", false)
-                    .clicked()
-                {
+                if ui.button("<- Библиотека").clicked() {
                     session.start_hint = Some("__close__".into());
                 }
                 ui.label(egui::RichText::new(crate::app::truncate(
@@ -408,23 +406,19 @@ pub fn show(
                             }
                         }
                     });
-                if crate::icons::button_with_text(
-                    ui,
-                    crate::icons::Icon::Prev,
-                    "Пред. глава",
-                    false,
-                )
-                .clicked()
-                {
+                let prev_ch = ui.add_enabled(
+                    session.current > 0,
+                    egui::Button::new("|<- Пред. глава"),
+                );
+                if prev_ch.clicked() {
                     session.switch_chapter(session.current - 1);
                 }
-                if crate::icons::button_with_text(
-                    ui,
-                    crate::icons::Icon::Next,
-                    "След. глава",
-                    false,
-                )
-                .clicked()
+                if ui
+                    .add_enabled(
+                        session.current + 1 < session.chapters.len(),
+                        egui::Button::new("След. глава ->|"),
+                    )
+                    .clicked()
                 {
                     session.switch_chapter(session.current + 1);
                 }
@@ -451,13 +445,12 @@ pub fn show(
                             }
                         }
                     });
-                let rtl_label = if session.rtl { "RTL" } else { "LTR" };
-                let rtl_icon = if session.rtl {
-                    crate::icons::Icon::DblPrev
-                } else {
-                    crate::icons::Icon::DblNext
-                };
-                if crate::icons::button_with_text(ui, rtl_icon, rtl_label, session.rtl).clicked() {
+                let rtl_text = if session.rtl { "[RTL ->]" } else { "[<- LTR]" };
+                let mut rtl_btn = egui::Button::new(egui::RichText::new(rtl_text).strong());
+                if session.rtl {
+                    rtl_btn = rtl_btn.fill(egui::Color32::from_rgb(30, 70, 45));
+                }
+                if ui.add(rtl_btn).clicked() {
                     session.rtl = !session.rtl;
                     lib.settings.rtl = session.rtl;
                     session.dirty = true;
@@ -478,15 +471,13 @@ pub fn show(
                             .unwrap_or(false)
                     })
                     .unwrap_or(false);
-                let star_icon = if marked {
-                    crate::icons::Icon::StarFilled
-                } else {
-                    crate::icons::Icon::Star
-                };
                 let can_bookmark = !ch_key.is_empty() && session.pages_state.is_ready();
-                if crate::icons::button_with_text(ui, star_icon, "Закладка", marked).clicked()
-                    && can_bookmark
-                {
+                let star_text = if marked { "[*] Закладка" } else { "[ ] Закладка" };
+                let mut star_btn = egui::Button::new(star_text);
+                if marked {
+                    star_btn = star_btn.fill(egui::Color32::from_rgb(60, 55, 20));
+                }
+                if ui.add_enabled(can_bookmark, star_btn).clicked() {
                     toggle_bookmark(session, lib);
                 }
                 if let Some(ch) = session.current_chapter() {
@@ -497,15 +488,15 @@ pub fn show(
                             downloads::is_downloaded(data_dir, id)
                         };
                         let busy = dl.running(id);
-                        let (dl_icon, dl_text) = if busy {
-                            (None, "Скачивание…")
+                        let dl_text = if busy {
+                            None
                         } else if got {
-                            (Some(crate::icons::Icon::Check), "Скачано")
+                            Some("Скачано")
                         } else {
-                            (Some(crate::icons::Icon::Download), "Скачать главу")
+                            Some("Скачать главу")
                         };
-                        let clicked = match dl_icon {
-                            Some(ic) => crate::icons::button_with_text(ui, ic, dl_text, false).clicked(),
+                        let clicked = match dl_text {
+                            Some(t) => ui.button(t).clicked(),
                             None => {
                                 // live progress of the running download
                                 match dl.progress(id) {
@@ -534,9 +525,8 @@ pub fn show(
             ui.horizontal(|ui| {
                 let total = session.total_pages();
                 if total > 0 {
-                    use crate::icons::{button, Icon};
                     // Five slots, mirrored when RTL: in RTL manga the "next"
-                    // page is to the LEFT, so left-pointing icons go forward.
+                    // page is to the LEFT, so "<" goes forward.
                     #[derive(Clone, Copy)]
                     enum Slot {
                         JumpStart,
@@ -553,8 +543,8 @@ pub fn show(
                     for slot in order {
                         match slot {
                             Slot::JumpStart => {
-                                let ic = if session.rtl { Icon::Last } else { Icon::First };
-                                if button(ui, ic, "В начало главы").clicked() {
+                                let (txt, tip) = if session.rtl { (">|", "В начало главы") } else { ("|<", "В начало главы") };
+                                if ui.button(txt).on_hover_text(tip).clicked() {
                                     session.page = 0;
                                     session.jump_to = Some(0);
                                     session.pan = Vec2::ZERO;
@@ -562,8 +552,8 @@ pub fn show(
                                 }
                             }
                             Slot::JumpEnd => {
-                                let ic = if session.rtl { Icon::First } else { Icon::Last };
-                                if button(ui, ic, "В конец главы").clicked() {
+                                let (txt, tip) = if session.rtl { ("|<", "В конец главы") } else { (">|", "В конец главы") };
+                                if ui.button(txt).on_hover_text(tip).clicked() {
                                     session.page = total - 1;
                                     session.jump_to = Some(session.page);
                                     session.pan = Vec2::ZERO;
@@ -572,14 +562,14 @@ pub fn show(
                             }
                             Slot::Prev => {
                                 // previous page: visually moves right in RTL
-                                let ic = if session.rtl { Icon::Next } else { Icon::Prev };
-                                if button(ui, ic, "Предыдущая страница").clicked() {
+                                let txt = if session.rtl { " > " } else { " < " };
+                                if ui.button(txt).on_hover_text("Предыдущая страница").clicked() {
                                     session.turn_page(-1);
                                 }
                             }
                             Slot::Next => {
-                                let ic = if session.rtl { Icon::Prev } else { Icon::Next };
-                                if button(ui, ic, "Следующая страница").clicked() {
+                                let txt = if session.rtl { " < " } else { " > " };
+                                if ui.button(txt).on_hover_text("Следующая страница").clicked() {
                                     session.turn_page(1);
                                 }
                             }
