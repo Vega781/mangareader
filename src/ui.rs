@@ -404,7 +404,7 @@ impl App {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            if ui.button("\u{25c4} Назад").clicked() {
+            if crate::icons::button_with_text(ui, crate::icons::Icon::Prev, "Назад", false).clicked() {
                 self.screen = Screen::Library;
             }
             ui.heading(truncate(&summary_title, 50));
@@ -441,10 +441,13 @@ impl App {
                     }
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if ui.button("\u{25b6} Читать").clicked() {
+                        if crate::icons::button_with_text(ui, crate::icons::Icon::Next, "Читать", false).clicked() {
                             read_clicked = true;
                         }
-                        if entry_present && ui.button("\u{25b6} Продолжить").clicked() {
+                        if entry_present
+                            && crate::icons::button_with_text(ui, crate::icons::Icon::Next, "Продолжить", false)
+                                .clicked()
+                        {
                             continue_clicked = true;
                         }
                         if has_summary {
@@ -518,14 +521,24 @@ impl App {
                             .as_ref()
                             .map(|e| e.finished.contains(&ch.key))
                             .unwrap_or(false);
-                        let read_mark = if finished {
-                            "\u{2713}"
-                        } else if prog > 0 {
-                            "\u{25d0}"
-                        } else {
-                            "\u{b7}"
-                        };
-                        ui.monospace(read_mark);
+                        {
+                            let (dot_rect, _) =
+                                ui.allocate_exact_size(egui::vec2(14.0, 20.0), Sense::hover());
+                            let cc = dot_rect.center();
+                            let p = ui.painter();
+                            if finished {
+                                p.circle_filled(cc, 4.5, egui::Color32::from_rgb(90, 200, 120));
+                            } else if prog > 0 {
+                                p.circle_filled(cc, 4.5, egui::Color32::from_rgb(220, 180, 80));
+                                p.circle_filled(
+                                    cc + egui::vec2(1.5, 1.5),
+                                    3.0,
+                                    egui::Color32::from_rgb(18, 18, 24),
+                                );
+                            } else {
+                                p.circle_filled(cc, 3.0, egui::Color32::from_rgb(90, 90, 100));
+                            }
+                        }
                         ui.label(truncate(&ch.label, 52));
                         if ch.total_pages > 0 {
                             ui.label(egui::RichText::new(format!("{} стр.", ch.total_pages)).weak());
@@ -533,14 +546,11 @@ impl App {
                         if let ChapterSource::Mangadex { id: cid } = &ch.source {
                             let got = crate::downloads::is_downloaded(&self.data_dir, cid);
                             let busy = self.downloads.running(cid);
-                            let txt = if busy {
-                                "\u{23f3}"
+                            if busy {
+                                ui.spinner();
                             } else if got {
-                                "\u{2713} офлайн"
-                            } else {
-                                "\u{2b07}"
-                            };
-                            if ui.small_button(txt).clicked() && !busy && !got {
+                                crate::icons::button(ui, crate::icons::Icon::Check, "Глава скачана, доступна офлайн");
+                            } else if crate::icons::button(ui, crate::icons::Icon::Download, "Скачать главу").clicked() {
                                 self.downloads.start(cid, id.to_string(), self.data_dir.clone());
                                 self.toast("Загрузка главы началась".into(), false);
                             }

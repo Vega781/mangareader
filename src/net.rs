@@ -51,3 +51,20 @@ pub fn encode_param(s: &str) -> String {
     }
     out
 }
+
+/// GET bytes with a few retries (MangaDex page servers time out sometimes).
+pub fn get_bytes_retry(url: &str, attempts: usize) -> Result<Vec<u8>, String> {
+    let mut last = String::new();
+    for i in 0..attempts {
+        match get_bytes(url) {
+            Ok(b) => return Ok(b),
+            Err(e) => {
+                last = e;
+                if i + 1 < attempts {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+            }
+        }
+    }
+    Err(last)
+}

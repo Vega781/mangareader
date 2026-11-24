@@ -20,14 +20,14 @@ pub enum ImgSource {
 impl ImgSource {
     pub fn load(&self) -> Result<Vec<u8>, String> {
         match self {
-            ImgSource::Url(url) => crate::net::get_bytes(url),
+            ImgSource::Url(url) => crate::net::get_bytes_retry(url, 3),
             ImgSource::UrlDisk { url, local } => {
                 if let Ok(bytes) = std::fs::read(local) {
                     if !bytes.is_empty() {
                         return Ok(bytes);
                     }
                 }
-                let bytes = crate::net::get_bytes(url)?;
+                let bytes = crate::net::get_bytes_retry(url, 3)?;
                 if let Some(parent) = local.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
@@ -151,6 +151,12 @@ impl ImageCache {
     pub fn get_or_request(&mut self, key: &str, src: ImgSource) -> Option<&TextureHandle> {
         self.request(key, src);
         self.get(key)
+    }
+
+    /// Forget an entry so it can be re-requested (retry after failure).
+    pub fn invalidate(&mut self, key: &str) {
+        self.entries.remove(key);
+        self.lru.retain(|k| k != key);
     }
 
     /// Drop everything (e.g. "clear cache" button).

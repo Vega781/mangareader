@@ -370,7 +370,9 @@ pub fn show(
         .show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                if ui.button("◄ Библиотека").clicked() {
+                if crate::icons::button_with_text(ui, crate::icons::Icon::Prev, "Библиотека", false)
+                    .clicked()
+                {
                     session.start_hint = Some("__close__".into());
                 }
                 ui.label(egui::RichText::new(crate::app::truncate(
@@ -400,18 +402,23 @@ pub fn show(
                             }
                         }
                     });
-                if ui
-                    .add_enabled(session.current > 0, egui::Button::new("Пред. глава"))
-                    .clicked()
+                if crate::icons::button_with_text(
+                    ui,
+                    crate::icons::Icon::Prev,
+                    "Пред. глава",
+                    false,
+                )
+                .clicked()
                 {
                     session.switch_chapter(session.current - 1);
                 }
-                if ui
-                    .add_enabled(
-                        session.current + 1 < session.chapters.len(),
-                        egui::Button::new("След. глава"),
-                    )
-                    .clicked()
+                if crate::icons::button_with_text(
+                    ui,
+                    crate::icons::Icon::Next,
+                    "След. глава",
+                    false,
+                )
+                .clicked()
                 {
                     session.switch_chapter(session.current + 1);
                 }
@@ -438,10 +445,13 @@ pub fn show(
                             }
                         }
                     });
-                if ui
-                    .selectable_label(session.rtl, if session.rtl { "◄◄ RTL" } else { "LTR ►►" })
-                    .clicked()
-                {
+                let rtl_label = if session.rtl { "RTL" } else { "LTR" };
+                let rtl_icon = if session.rtl {
+                    crate::icons::Icon::DblPrev
+                } else {
+                    crate::icons::Icon::DblNext
+                };
+                if crate::icons::button_with_text(ui, rtl_icon, rtl_label, session.rtl).clicked() {
                     session.rtl = !session.rtl;
                     lib.settings.rtl = session.rtl;
                     session.dirty = true;
@@ -462,13 +472,14 @@ pub fn show(
                             .unwrap_or(false)
                     })
                     .unwrap_or(false);
-                let star = if marked { "★ Закладка" } else { "☆ Закладка" };
-                if ui
-                    .add_enabled(
-                        !ch_key.is_empty() && session.pages_state.is_ready(),
-                        egui::Button::new(star),
-                    )
-                    .clicked()
+                let star_icon = if marked {
+                    crate::icons::Icon::StarFilled
+                } else {
+                    crate::icons::Icon::Star
+                };
+                let can_bookmark = !ch_key.is_empty() && session.pages_state.is_ready();
+                if crate::icons::button_with_text(ui, star_icon, "Закладка", marked).clicked()
+                    && can_bookmark
                 {
                     toggle_bookmark(session, lib);
                 }
@@ -476,14 +487,21 @@ pub fn show(
                     if let ChapterSource::Mangadex { id } = &ch.source {
                         let got = downloads::is_downloaded(data_dir, id);
                         let busy = dl.running(id);
-                        let txt = if busy {
-                            "⏳ Скачивание…"
+                        let (dl_icon, dl_text) = if busy {
+                            (None, "Скачивание…")
                         } else if got {
-                            "✓ Скачано"
+                            (Some(crate::icons::Icon::Check), "Скачано")
                         } else {
-                            "⬇ Скачать"
+                            (Some(crate::icons::Icon::Download), "Скачать главу")
                         };
-                        if ui.add_enabled(!busy && !got, egui::Button::new(txt)).clicked() {
+                        let clicked = match dl_icon {
+                            Some(ic) => crate::icons::button_with_text(ui, ic, dl_text, false).clicked(),
+                            None => {
+                                ui.spinner();
+                                false
+                            }
+                        };
+                        if clicked && !busy && !got {
                             dl.start(id, session.manga_id.clone(), data_dir.to_path_buf());
                             (toast)("Загрузка главы началась".to_string(), false);
                         }
@@ -494,15 +512,28 @@ pub fn show(
             ui.horizontal(|ui| {
                 let total = session.total_pages();
                 if total > 0 {
-                    let left_btn = if session.rtl { "►|" } else { "|◄" };
-                    let right_btn = if session.rtl { "|◄" } else { "►|" };
-                    if ui.button(left_btn).clicked() {
+                    let (first_icon, turn1_icon, turn2_icon, last_icon) = if session.rtl {
+                        (
+                            crate::icons::Icon::Last,
+                            crate::icons::Icon::Next,
+                            crate::icons::Icon::Prev,
+                            crate::icons::Icon::First,
+                        )
+                    } else {
+                        (
+                            crate::icons::Icon::First,
+                            crate::icons::Icon::Prev,
+                            crate::icons::Icon::Next,
+                            crate::icons::Icon::Last,
+                        )
+                    };
+                    if crate::icons::button(ui, first_icon, "В начало").clicked() {
                         session.page = 0;
                         session.jump_to = Some(0);
                         session.pan = Vec2::ZERO;
                         session.pending_save = true;
                     }
-                    if ui.button(if session.rtl { "►" } else { "◄" }).clicked() {
+                    if crate::icons::button(ui, turn1_icon, "Предыдущая страница").clicked() {
                         session.turn_page(if session.rtl { -1 } else { 1 });
                     }
                     let mut cur = (session.page + 1) as f32;
@@ -517,10 +548,10 @@ pub fn show(
                         session.pan = Vec2::ZERO;
                         session.pending_save = true;
                     }
-                    if ui.button(if session.rtl { "◄" } else { "►" }).clicked() {
+                    if crate::icons::button(ui, turn2_icon, "Следующая страница").clicked() {
                         session.turn_page(if session.rtl { 1 } else { -1 });
                     }
-                    if ui.button(right_btn).clicked() {
+                    if crate::icons::button(ui, last_icon, "В конец").clicked() {
                         session.page = total - 1;
                         session.jump_to = Some(total - 1);
                         session.pan = Vec2::ZERO;
@@ -727,6 +758,14 @@ fn src_key(src: &ImgSource) -> String {
     }
 }
 
+fn truncate_err(s: &str) -> String {
+    if s.chars().count() <= 90 {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(90).collect::<String>())
+    }
+}
+
 fn fit_scale(fit: Fit, avail: Vec2, ts: Vec2) -> f32 {
     if ts.x <= 0.0 || ts.y <= 0.0 {
         return 1.0;
@@ -801,15 +840,19 @@ fn show_paged(session: &mut ReaderSession, ui: &mut Ui, images: &mut ImageCache)
         if failed.is_none() {
             images.request(&key, src);
         }
+        let resp = ui.allocate_rect(avail_rect, Sense::click());
         let c = avail_rect.center();
         if let Some(msg) = failed {
             ui.painter().text(
                 c,
                 egui::Align2::CENTER_CENTER,
-                msg,
+                format!("{}\n\n(клик — повторить)", truncate_err(&msg)),
                 egui::FontId::default(),
                 egui::Color32::RED,
             );
+            if resp.clicked() {
+                images.invalidate(&key);
+            }
         } else {
             ui.painter().circle_filled(c, 18.0, egui::Color32::from_rgb(90, 90, 120));
         }
@@ -836,13 +879,33 @@ fn show_strip(session: &mut ReaderSession, ui: &mut Ui, images: &mut ImageCache)
                     w * 1.4 // placeholder aspect until loaded
                 };
                 let size = Vec2::new(w, h.max(1.0));
-                let (rect, _) = ui.allocate_exact_size(size, Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
                 if let Some(tex) = images.get(&key) {
                     draw_texture(ui, tex, rect);
                 } else {
                     images.request(&key, src.clone());
                     ui.painter()
                         .rect_filled(rect, 4.0, egui::Color32::from_rgb(18, 18, 24));
+                    if let Some(_err) = images.failed(&key) {
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "ошибка загрузки\n(клик — повторить)",
+                            egui::FontId::default(),
+                            egui::Color32::RED,
+                        );
+                        if resp.clicked() {
+                            images.invalidate(&key);
+                        }
+                    } else {
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "…",
+                            egui::FontId::proportional(28.0),
+                            egui::Color32::GRAY,
+                        );
+                    }
                 }
                 rects.borrow_mut().push(rect);
             }
