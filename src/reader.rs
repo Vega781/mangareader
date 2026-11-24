@@ -512,50 +512,70 @@ pub fn show(
             ui.horizontal(|ui| {
                 let total = session.total_pages();
                 if total > 0 {
-                    let (first_icon, turn1_icon, turn2_icon, last_icon) = if session.rtl {
-                        (
-                            crate::icons::Icon::Last,
-                            crate::icons::Icon::Next,
-                            crate::icons::Icon::Prev,
-                            crate::icons::Icon::First,
-                        )
+                    use crate::icons::{button, Icon};
+                    // Five slots, mirrored when RTL: in RTL manga the "next"
+                    // page is to the LEFT, so left-pointing icons go forward.
+                    #[derive(Clone, Copy)]
+                    enum Slot {
+                        JumpStart,
+                        Prev,
+                        Slider,
+                        Next,
+                        JumpEnd,
+                    }
+                    let order: [Slot; 5] = if session.rtl {
+                        [Slot::JumpEnd, Slot::Next, Slot::Slider, Slot::Prev, Slot::JumpStart]
                     } else {
-                        (
-                            crate::icons::Icon::First,
-                            crate::icons::Icon::Prev,
-                            crate::icons::Icon::Next,
-                            crate::icons::Icon::Last,
-                        )
+                        [Slot::JumpStart, Slot::Prev, Slot::Slider, Slot::Next, Slot::JumpEnd]
                     };
-                    if crate::icons::button(ui, first_icon, "В начало").clicked() {
-                        session.page = 0;
-                        session.jump_to = Some(0);
-                        session.pan = Vec2::ZERO;
-                        session.pending_save = true;
-                    }
-                    if crate::icons::button(ui, turn1_icon, "Предыдущая страница").clicked() {
-                        session.turn_page(if session.rtl { -1 } else { 1 });
-                    }
-                    let mut cur = (session.page + 1) as f32;
-                    let resp = ui.add(
-                        egui::Slider::new(&mut cur, 1.0..=total as f32)
-                            .show_value(false)
-                            .text(format!("{} / {}", session.page + 1, total)),
-                    );
-                    if resp.changed() {
-                        session.page = cur as usize - 1;
-                        session.jump_to = Some(session.page);
-                        session.pan = Vec2::ZERO;
-                        session.pending_save = true;
-                    }
-                    if crate::icons::button(ui, turn2_icon, "Следующая страница").clicked() {
-                        session.turn_page(if session.rtl { 1 } else { -1 });
-                    }
-                    if crate::icons::button(ui, last_icon, "В конец").clicked() {
-                        session.page = total - 1;
-                        session.jump_to = Some(total - 1);
-                        session.pan = Vec2::ZERO;
-                        session.pending_save = true;
+                    for slot in order {
+                        match slot {
+                            Slot::JumpStart => {
+                                let ic = if session.rtl { Icon::Last } else { Icon::First };
+                                if button(ui, ic, "В начало главы").clicked() {
+                                    session.page = 0;
+                                    session.jump_to = Some(0);
+                                    session.pan = Vec2::ZERO;
+                                    session.pending_save = true;
+                                }
+                            }
+                            Slot::JumpEnd => {
+                                let ic = if session.rtl { Icon::First } else { Icon::Last };
+                                if button(ui, ic, "В конец главы").clicked() {
+                                    session.page = total - 1;
+                                    session.jump_to = Some(session.page);
+                                    session.pan = Vec2::ZERO;
+                                    session.pending_save = true;
+                                }
+                            }
+                            Slot::Prev => {
+                                // previous page: visually moves right in RTL
+                                let ic = if session.rtl { Icon::Next } else { Icon::Prev };
+                                if button(ui, ic, "Предыдущая страница").clicked() {
+                                    session.turn_page(-1);
+                                }
+                            }
+                            Slot::Next => {
+                                let ic = if session.rtl { Icon::Prev } else { Icon::Next };
+                                if button(ui, ic, "Следующая страница").clicked() {
+                                    session.turn_page(1);
+                                }
+                            }
+                            Slot::Slider => {
+                                let mut cur = (session.page + 1) as f32;
+                                let resp = ui.add(
+                                    egui::Slider::new(&mut cur, 1.0..=total as f32)
+                                        .show_value(false)
+                                        .text(format!("{} / {}", session.page + 1, total)),
+                                );
+                                if resp.changed() {
+                                    session.page = cur as usize - 1;
+                                    session.jump_to = Some(session.page);
+                                    session.pan = Vec2::ZERO;
+                                    session.pending_save = true;
+                                }
+                            }
+                        }
                     }
                 } else {
                     ui.spinner();
@@ -683,15 +703,15 @@ fn handle_input(session: &mut ReaderSession, ctx: &egui::Context) {
             let threshold = 60.0;
             if session.wheel_acc <= -threshold {
                 session.wheel_acc = 0.0;
-                session.turn_page(if session.rtl { -1 } else { 1 });
+                session.turn_page(1);
             } else if session.wheel_acc >= threshold {
                 session.wheel_acc = 0.0;
-                session.turn_page(if session.rtl { 1 } else { -1 });
+                session.turn_page(-1);
             }
         }
-        if i.key_pressed(Key::ArrowLeft) {
+        if i.key_pressed(Key::ArrowRight) {
             session.turn_page(if session.rtl { -1 } else { 1 });
-        } else if i.key_pressed(Key::ArrowRight) {
+        } else if i.key_pressed(Key::ArrowLeft) {
             session.turn_page(if session.rtl { 1 } else { -1 });
         }
         if i.key_pressed(Key::Space) {

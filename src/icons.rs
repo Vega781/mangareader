@@ -73,8 +73,8 @@ pub fn draw(ui: &mut Ui, icon: Icon, rect: egui::Rect, color: Color32) {
         }
         Icon::First | Icon::Last => {
             let dir = if matches!(icon, Icon::Last) { 1.0 } else { -1.0 };
-            // bar
-            let bar_x = c.x - dir * s * 1.15;
+            // bar on the opposite side of the pointing direction
+            let bar_x = c.x + dir * s * 1.15;
             p.line_segment(
                 [
                     egui::pos2(bar_x, c.y - s * 0.95),
