@@ -365,7 +365,13 @@ impl App {
                         }
                     }
                 }
-                Err(e) => self.toast(format!("Ошибка загрузки главы: {e}"), true),
+                Err(e) => {
+                    if e == crate::downloads::CANCELLED {
+                        self.toast("Скачивание остановлено".into(), false);
+                    } else {
+                        self.toast(format!("Ошибка загрузки главы: {e}"), true);
+                    }
+                }
             }
         }
         if self.downloads.active() == 0 && self.downloads.pending() == 0 && had_queue {

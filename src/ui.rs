@@ -609,8 +609,8 @@ impl App {
                             ui.label(format!("В очереди осталось: {} глав", queued));
                         });
                         if ui.button("Остановить").clicked() {
-                            self.downloads.clear_queue();
-                            self.toast("Очередь очищена (текущая глава докачается)".into(), false);
+                            self.downloads.stop_all();
+                            self.toast("Скачивание остановлено".into(), false);
                         }
                     }
                     let downloaded_count = chapters

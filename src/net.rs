@@ -68,3 +68,37 @@ pub fn get_bytes_retry(url: &str, attempts: usize) -> Result<Vec<u8>, String> {
     }
     Err(last)
 }
+
+/// Abort marker used by cancellable retries.
+pub const CANCELLED: &str = "Отменено";
+
+/// Same as `get_bytes_retry`, but aborts immediately when `cancel` is set.
+pub fn get_bytes_retry_cancel(
+    url: &str,
+    attempts: usize,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<u8>, String> {
+    use std::sync::atomic::Ordering;
+    let mut last = String::new();
+    for i in 0..attempts {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(CANCELLED.to_string());
+        }
+        match get_bytes(url) {
+            Ok(b) => return Ok(b),
+            Err(e) => {
+                last = e;
+                if i + 1 < attempts {
+                    // sleep in small steps so cancel is noticed quickly
+                    for _ in 0..5 {
+                        if cancel.load(Ordering::Relaxed) {
+                            return Err(CANCELLED.to_string());
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }
+        }
+    }
+    Err(last)
+}

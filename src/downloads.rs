@@ -1,11 +1,21 @@
-//! Offline chapter downloads from MangaDex (sequential, rate-limit friendly),
-//! with live progress reporting per chapter.
+//! Offline chapter downloads from MangaDex.
+//! Pages are downloaded in parallel (small worker pool) with live progress,
+//! and can be cancelled at any moment (stop button / chapter deletion).
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::jobs::Job;
 use crate::mangadex;
+
+/// How many pages of one chapter are downloaded concurrently.
+/// MangaDex tolerates a handful of parallel image requests; more is pointless
+/// because the bottleneck is the server, not the client.
+const PARALLEL_PAGES: usize = 4;
+
+/// Message returned when a download was cancelled by the user.
+pub const CANCELLED: &str = "Остановлено";
 
 /// Live download progress of one chapter.
 #[derive(Clone, Copy, Debug)]
@@ -34,6 +44,8 @@ pub struct Downloads {
     jobs: HashMap<String, DownloadJob>,
     queue: VecDeque<(String, String, u32)>, // (chapter_id, manga_id, total_pages)
     progress: Arc<Mutex<HashMap<String, ChapterProgress>>>,
+    /// cancel flags for running background threads, keyed by chapter id
+    cancels: HashMap<String, Arc<AtomicBool>>,
 }
 
 impl Default for Downloads {
@@ -42,6 +54,7 @@ impl Default for Downloads {
             jobs: HashMap::new(),
             queue: VecDeque::new(),
             progress: Arc::new(Mutex::new(HashMap::new())),
+            cancels: HashMap::new(),
         }
     }
 }
@@ -120,11 +133,13 @@ impl Downloads {
         }
         let id = chapter_id.to_string();
         let progress = self.progress.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.cancels.insert(id.clone(), cancel.clone());
         self.jobs.insert(
             id.clone(),
             DownloadJob {
                 manga_id,
-                job: Job::spawn(move || download_chapter(&id, &data_dir, progress)),
+                job: Job::spawn(move || download_chapter(&id, &data_dir, progress, &cancel)),
             },
         );
     }
@@ -140,10 +155,26 @@ impl Downloads {
         self.queue.clear();
     }
 
+    /// Stop everything: clear the queue and cancel the running chapter.
+    pub fn stop_all(&mut self) {
+        self.queue.clear();
+        for (id, cancel) in self.cancels.drain() {
+            cancel.store(true, Ordering::Relaxed);
+            self.jobs.remove(&id);
+        }
+        if let Ok(mut m) = self.progress.lock() {
+            m.clear();
+        }
+    }
+
     /// Drop queued/running job for a chapter (e.g. after deletion).
+    /// Cancels the background thread — it stops within a second.
     pub fn remove_chapter(&mut self, chapter_id: &str) {
         self.queue.retain(|(id, _, _)| id != chapter_id);
         self.jobs.remove(chapter_id);
+        if let Some(cancel) = self.cancels.remove(chapter_id) {
+            cancel.store(true, Ordering::Relaxed);
+        }
         if let Ok(mut m) = self.progress.lock() {
             m.remove(chapter_id);
         }
@@ -178,6 +209,7 @@ impl Downloads {
                 if let Ok(mut m) = self.progress.lock() {
                     m.remove(&id);
                 }
+                self.cancels.remove(&id);
                 if let Some(dj) = self.jobs.remove(&id) {
                     done.push((id, dj.manga_id, result));
                 }
@@ -204,7 +236,12 @@ fn download_chapter(
     chapter_id: &str,
     data_dir: &Path,
     progress: Arc<Mutex<HashMap<String, ChapterProgress>>>,
+    cancel: &AtomicBool,
 ) -> Result<(), String> {
+    let cancelled = || cancel.load(Ordering::Relaxed);
+    if cancelled() {
+        return Err(CANCELLED.to_string());
+    }
     let (base, hash, pages) = mangadex::at_home(chapter_id)?;
     let total = pages.len() as u32;
     set_progress(&progress, chapter_id, |p| {
@@ -212,26 +249,82 @@ fn download_chapter(
     });
     let dir = chapter_dir(data_dir, chapter_id);
     std::fs::create_dir_all(&dir).map_err(|e| format!("Не удалось создать папку загрузки: {e}"))?;
-    for (i, page) in pages.iter().enumerate() {
-        let ext = page.rsplit('.').next().unwrap_or("jpg");
-        let name = format!("{:04}.{}", i + 1, ext.to_ascii_lowercase());
-        let path = dir.join(&name);
-        // resume: skip pages already on disk
-        let have = std::fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false);
-        if !have {
-            let url = mangadex::page_url(&base, &hash, page);
-            let bytes = crate::net::get_bytes_retry(&url, 3).map_err(|e| {
-                set_progress(&progress, chapter_id, |p| p.failed = true);
-                format!("Страница {}: {e}", i + 1)
-            })?;
-            std::fs::write(&path, &bytes)
-                .map_err(|e| format!("Не удалось записать страницу: {e}"))?;
-            // be gentle with the API (its ToS asks for delays between requests)
-            std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // shared work queue: (index, file name)
+    let work: Mutex<VecDeque<(usize, &String)>> =
+        Mutex::new(pages.iter().enumerate().collect());
+    let completed = Arc::new(AtomicUsize::new(0));
+    let first_error: Mutex<Option<String>> = Mutex::new(None);
+    let stop_pool = Arc::new(AtomicBool::new(false));
+
+    std::thread::scope(|s| {
+        let dir = &dir;
+        let base = &base;
+        let hash = &hash;
+        let progress = &progress;
+        for _ in 0..PARALLEL_PAGES.min(pages.len().max(1)) {
+            let work = &work;
+            let completed = &completed;
+            let first_error = &first_error;
+            let stop_pool = &stop_pool;
+            s.spawn(move || loop {
+                // a page failed (or cancelled) somewhere else — stop pulling work
+                if cancelled()
+                    || stop_pool.load(Ordering::Relaxed)
+                    || first_error.lock().unwrap().is_some()
+                {
+                    break;
+                }
+                let Some((i, page)) = work.lock().unwrap().pop_front() else {
+                    break; // no more work
+                };
+                let ext = page.rsplit('.').next().unwrap_or("jpg");
+                let name = format!("{:04}.{}", i + 1, ext.to_ascii_lowercase());
+                let path = dir.join(&name);
+                // resume: skip pages already on disk
+                let have = std::fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false);
+                if !have {
+                    let url = mangadex::page_url(&base, &hash, page);
+                    match crate::net::get_bytes_retry_cancel(&url, 3, cancel) {
+                        Ok(bytes) => {
+                            if let Err(e) = std::fs::write(&path, &bytes) {
+                                let msg = format!("Не удалось записать страницу {}: {e}", i + 1);
+                                *first_error.lock().unwrap() = Some(msg);
+                                stop_pool.store(true, Ordering::Relaxed);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            set_progress(&progress, chapter_id, |p| p.failed = true);
+                            let msg = if cancelled() {
+                                CANCELLED.to_string()
+                            } else {
+                                format!("Страница {}: {e}", i + 1)
+                            };
+                            *first_error.lock().unwrap() = Some(msg);
+                            stop_pool.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                    // be gentle with the API (its ToS asks for delays between requests)
+                    for _ in 0..10 {
+                        if cancelled() || stop_pool.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(30));
+                    }
+                }
+                let n = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                set_progress(&progress, chapter_id, |p| p.done = n as u32);
+            });
         }
-        set_progress(&progress, chapter_id, |p| {
-            p.done = (i + 1) as u32;
-        });
+    });
+
+    if cancelled() {
+        return Err(CANCELLED.to_string());
+    }
+    if let Some(e) = first_error.into_inner().unwrap() {
+        return Err(e);
     }
     Ok(())
 }
