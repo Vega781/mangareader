@@ -502,6 +502,50 @@ impl App {
                 }
             }
 
+            // download-all queue controls (MangaDex only)
+            if chapters.iter().any(|c| matches!(c.source, ChapterSource::Mangadex { .. })) {
+                let entry = self.lib.entry(id).cloned();
+                let missing: Vec<(String, String)> = chapters
+                    .iter()
+                    .filter_map(|c| match &c.source {
+                        ChapterSource::Mangadex { id: cid } => {
+                            let downloaded = entry
+                                .as_ref()
+                                .map(|e| e.downloaded.contains(cid))
+                                .unwrap_or(false)
+                                || crate::downloads::is_downloaded(&self.data_dir, cid);
+                            if downloaded || self.downloads.running(cid) || self.downloads.queued(cid) {
+                                None
+                            } else {
+                                Some((cid.clone(), id.to_string()))
+                            }
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                ui.horizontal(|ui| {
+                    let active = self.downloads.active();
+                    let queued = self.downloads.pending();
+                    if !missing.is_empty() {
+                        if ui.button(format!("Скачать всю мангу ({})", missing.len())).clicked() {
+                            for (cid, mid) in &missing {
+                                self.downloads.enqueue(cid.clone(), mid.clone());
+                            }
+                            self.toast(format!("В очередь добавлено глав: {}", missing.len()), false);
+                        }
+                    }
+                    if active + queued > 0 {
+                        ui.spinner();
+                        ui.label(format!("Скачивание: {} сейчас, {} в очереди", active, queued));
+                        if ui.button("Остановить").clicked() {
+                            self.downloads.clear_queue();
+                            self.toast("Очередь очищена (текущая глава докачается)".into(), false);
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+            }
+
             ui.heading(format!("Главы ({})", chapters.len()));
             ui.add_space(4.0);
             if ch_loading {
@@ -546,11 +590,14 @@ impl App {
                         if let ChapterSource::Mangadex { id: cid } = &ch.source {
                             let got = crate::downloads::is_downloaded(&self.data_dir, cid);
                             let busy = self.downloads.running(cid);
+                            let queued = self.downloads.queued(cid);
                             if busy {
                                 ui.spinner();
+                            } else if queued {
+                                ui.label(egui::RichText::new("в очереди").weak());
                             } else if got {
-                                crate::icons::button(ui, crate::icons::Icon::Check, "Глава скачана, доступна офлайн");
-                            } else if crate::icons::button(ui, crate::icons::Icon::Download, "Скачать главу").clicked() {
+                                crate::icons::button_sized(ui, crate::icons::Icon::Check, "Глава скачана, доступна офлайн", 22.0);
+                            } else if crate::icons::button_sized(ui, crate::icons::Icon::Download, "Скачать главу", 22.0).clicked() {
                                 self.downloads.start(cid, id.to_string(), self.data_dir.clone());
                                 self.toast("Загрузка главы началась".into(), false);
                             }

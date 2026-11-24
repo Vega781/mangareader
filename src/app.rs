@@ -282,7 +282,8 @@ impl App {
     // ---------- downloads ----------
 
     fn poll_downloads(&mut self) {
-        for (chapter_id, manga_id, res) in self.downloads.poll() {
+        let had_queue = self.downloads.active() + self.downloads.pending() > 1;
+        for (chapter_id, manga_id, res) in self.downloads.poll(&self.data_dir) {
             match res {
                 Ok(()) => {
                     if let Some(e) = self.lib.entry_mut(&manga_id) {
@@ -305,6 +306,9 @@ impl App {
                 }
                 Err(e) => self.toast(format!("Ошибка загрузки главы: {e}"), true),
             }
+        }
+        if self.downloads.active() == 0 && self.downloads.pending() == 0 && had_queue {
+            self.toast("Все загрузки завершены".into(), false);
         }
     }
 

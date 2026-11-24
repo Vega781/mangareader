@@ -41,7 +41,8 @@ pub fn draw(ui: &mut Ui, icon: Icon, rect: egui::Rect, color: Color32) {
     let p = ui.painter();
     let c = rect.center();
     let s = rect.height().min(rect.width()) * 0.42; // icon half-size
-    let stroke = egui::Stroke::new(1.8, color);
+    let sw = (s * 0.34).clamp(1.8, 3.5);
+    let stroke = egui::Stroke::new(sw, color);
     match icon {
         Icon::Prev | Icon::Next => {
             let dir = if matches!(icon, Icon::Next) { 1.0 } else { -1.0 };
@@ -114,30 +115,24 @@ pub fn draw(ui: &mut Ui, icon: Icon, rect: egui::Rect, color: Color32) {
             p.add(egui::Shape::convex_polygon(pts, fill, stroke));
         }
         Icon::Download => {
-            // vertical arrow down
-            ui.painter().line_segment([c - egui::vec2(0.0, s), c + egui::vec2(0.0, s * 0.35)], stroke);
+            // thick shaft + solid arrow head + base line (classic download glyph)
+            ui.painter().line_segment(
+                [c - egui::vec2(0.0, s), c + egui::vec2(0.0, s * 0.30)],
+                stroke,
+            );
             tri(
                 ui,
-                c + egui::vec2(0.0, s * 0.75),
-                s * 0.55,
-                -s * 0.95,
+                c + egui::vec2(0.0, s * 0.85),
+                s * 0.62,
+                -s * 1.05,
                 color,
             );
-            // tray
             ui.painter().line_segment(
                 [
-                    c + egui::vec2(-s * 0.95, s * 0.55),
-                    c + egui::vec2(-s * 0.95, s),
+                    egui::pos2(c.x - s * 0.95, c.y + s),
+                    egui::pos2(c.x + s * 0.95, c.y + s),
                 ],
-                stroke,
-            );
-            ui.painter().line_segment(
-                [c + egui::vec2(-s * 0.95, s), c + egui::vec2(s * 0.95, s)],
-                stroke,
-            );
-            ui.painter().line_segment(
-                [c + egui::vec2(s * 0.95, s), c + egui::vec2(s * 0.95, s * 0.55)],
-                stroke,
+                egui::Stroke::new(sw, color),
             );
         }
         Icon::Check => {
@@ -147,7 +142,7 @@ pub fn draw(ui: &mut Ui, icon: Icon, rect: egui::Rect, color: Color32) {
                     c + egui::vec2(-s * 0.2, s * 0.7),
                     c + egui::vec2(s * 0.9, -s * 0.7),
                 ],
-                egui::Stroke::new(2.2, color),
+                egui::Stroke::new(sw, color),
             ));
         }
     }
@@ -213,4 +208,20 @@ pub fn button_with_text(ui: &mut Ui, icon: Icon, text: &str, selected: bool) -> 
         fg,
     );
     resp
+}
+
+/// Icon-only button with an explicit pixel size (for tight lists).
+pub fn button_sized(ui: &mut Ui, icon: Icon, tip: &str, px: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(px), Sense::click());
+    if resp.hovered() {
+        let bg = ui.visuals().widgets.hovered.bg_fill;
+        ui.painter().rect_filled(rect, 4.0, bg);
+    }
+    let fg = if resp.hovered() {
+        ui.visuals().widgets.hovered.fg_stroke.color
+    } else {
+        ui.visuals().widgets.inactive.fg_stroke.color
+    };
+    draw(ui, icon, rect, fg);
+    resp.on_hover_text(tip)
 }

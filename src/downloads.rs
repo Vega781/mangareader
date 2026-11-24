@@ -1,5 +1,5 @@
 //! Offline chapter downloads from MangaDex (sequential, rate-limit friendly).
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use crate::jobs::Job;
@@ -12,11 +12,15 @@ struct DownloadJob {
 
 pub struct Downloads {
     jobs: HashMap<String, DownloadJob>,
+    queue: VecDeque<(String, String)>, // (chapter_id, manga_id)
 }
 
 impl Default for Downloads {
     fn default() -> Self {
-        Downloads { jobs: HashMap::new() }
+        Downloads {
+            jobs: HashMap::new(),
+            queue: VecDeque::new(),
+        }
     }
 }
 
@@ -33,6 +37,38 @@ pub fn is_downloaded(data_dir: &Path, chapter_id: &str) -> bool {
 }
 
 impl Downloads {
+    pub fn queued(&self, chapter_id: &str) -> bool {
+        self.queue.iter().any(|(id, _)| id == chapter_id)
+    }
+
+    pub fn pending(&self) -> usize {
+        self.queue.len()
+    }
+
+    pub fn active(&self) -> usize {
+        self.jobs.len()
+    }
+
+    pub fn enqueue(&mut self, chapter_id: String, manga_id: String) {
+        if self.jobs.contains_key(&chapter_id) || self.queued(&chapter_id) {
+            return;
+        }
+        self.queue.push_back((chapter_id, manga_id));
+    }
+
+    pub fn clear_queue(&mut self) {
+        self.queue.clear();
+    }
+
+    /// Start next queued download when no job is active.
+    fn maybe_start_next(&mut self, data_dir: &Path) {
+        if self.jobs.is_empty() {
+            if let Some((chapter_id, manga_id)) = self.queue.pop_front() {
+                self.start(&chapter_id, manga_id, data_dir.to_path_buf());
+            }
+        }
+    }
+
     pub fn running(&self, chapter_id: &str) -> bool {
         self.jobs.contains_key(chapter_id)
     }
@@ -56,7 +92,8 @@ impl Downloads {
     }
 
     /// Finished downloads this frame: (chapter_id, manga_id, result).
-    pub fn poll(&mut self) -> Vec<(String, String, Result<(), String>)> {
+    /// Also starts the next queued chapter.
+    pub fn poll(&mut self, data_dir: &Path) -> Vec<(String, String, Result<(), String>)> {
         let mut done = Vec::new();
         let ids: Vec<String> = self.jobs.keys().cloned().collect();
         for id in ids {
@@ -76,6 +113,7 @@ impl Downloads {
                 }
             }
         }
+        self.maybe_start_next(data_dir);
         done
     }
 }
