@@ -1,0 +1,17 @@
+[package]
+name = "mangareader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+ureq = { version = "2", features = ["json", "gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
