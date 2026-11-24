@@ -169,6 +169,11 @@ impl App {
     }
 
     pub fn toast(&mut self, msg: String, error: bool) {
+        // dedupe: identical recent message just refreshes its timer
+        if let Some(t) = self.toasts.iter_mut().find(|t| t.msg == msg) {
+            t.at = Instant::now();
+            return;
+        }
         self.toasts.push(Toast::new(msg, error));
         if self.toasts.len() > 6 {
             self.toasts.remove(0);
@@ -353,7 +358,9 @@ impl App {
                         }
                     }
                     self.save_needed = true;
-                    self.toast("Глава скачана и доступна офлайн".into(), false);
+                    // no per-chapter toast during bulk downloads: the progress
+                    // panel already shows completion, and the final summary fires
+                    // when the whole queue drains ("Все загрузки завершены")
                     // reload if this chapter is currently being read
                     if let Some(session) = self.reader.as_mut() {
                         if session
@@ -448,23 +455,53 @@ impl App {
         }
         let toasts = std::mem::take(&mut self.toasts);
         egui::Area::new(egui::Id::new("toasts"))
-            .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -24.0])
+            .anchor(egui::Align2::RIGHT_TOP, [-14.0, 44.0])
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 for t in &toasts {
-                    let bg = if t.error {
-                        egui::Color32::from_rgb(70, 25, 25)
+                    let elapsed = t.at.elapsed().as_secs_f32();
+                    let life = 6.0_f32;
+                    // fade in first 0.15s, fade out over the last 0.8s
+                    let alpha = (elapsed / 0.15).min(1.0) * ((life - elapsed) / 0.8).min(1.0);
+                    let (accent, text_col) = if t.error {
+                        (
+                            egui::Color32::from_rgb(200, 80, 80),
+                            egui::Color32::from_rgb(235, 180, 180),
+                        )
                     } else {
-                        egui::Color32::from_rgb(30, 45, 30)
+                        (
+                            egui::Color32::from_rgb(110, 200, 130),
+                            egui::Color32::from_rgb(200, 220, 200),
+                        )
                     };
+                    let bg = egui::Color32::from_rgba_unmultiplied(16, 18, 16, (alpha * 235.0) as u8);
+                    let border = egui::Color32::from_rgba_unmultiplied(70, 75, 70, (alpha * 200.0) as u8);
                     egui::Frame::default()
                         .fill(bg)
-                        .rounding(8.0)
-                        .inner_margin(egui::Margin::symmetric(14, 8))
+                        .stroke(egui::Stroke::new(1.0, border))
+                        .rounding(2.0)
+                        .inner_margin(egui::Margin::symmetric(10, 7))
+                        .outer_margin(egui::Margin::same(0))
                         .show(ui, |ui| {
-                            ui.label(egui::RichText::new(&t.msg).color(egui::Color32::WHITE));
+                            ui.horizontal(|ui| {
+                                // accent bar
+                                let (bar_rect, _) = ui
+                                    .allocate_exact_size(egui::vec2(3.0, 20.0), egui::Sense::hover());
+                                ui.painter().rect_filled(
+                                    bar_rect,
+                                    1.0,
+                                    accent.gamma_multiply(alpha),
+                                );
+                                ui.add_space(6.0);
+                                ui.label(
+                                    egui::RichText::new(&t.msg)
+                                        .monospace()
+                                        .size(13.0)
+                                        .color(text_col.gamma_multiply(alpha)),
+                                );
+                            });
                         });
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
                 }
             });
         self.toasts = toasts;
