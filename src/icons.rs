@@ -27,70 +27,53 @@ pub enum Icon {
     Trash,
 }
 
-fn tri(ui: &mut Ui, apex: egui::Pos2, half_h: f32, back: f32, color: Color32) {
-    // apex: tip position; triangle points towards +x if back>0 else -x
-    let c = apex;
-    let p = ui.painter();
-    let pts = vec![
-        egui::pos2(c.x, c.y),
-        egui::pos2(c.x - back, c.y - half_h),
-        egui::pos2(c.x - back, c.y + half_h),
-    ];
-    p.add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
+fn tri(ui: &mut Ui, apex: egui::Pos2, dir: egui::Vec2, half_h: f32, len: f32, color: Color32) {
+    // solid triangle: tip at `apex`, extending `len` opposite to `dir`,
+    // with half-width `half_h` perpendicular to `dir`
+    let d = dir.normalized();
+    let base = apex - d * len;
+    let perp = egui::vec2(-d.y, d.x) * half_h;
+    let pts = vec![apex, base + perp, base - perp];
+    ui.painter()
+        .add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
 }
 
 pub fn draw(ui: &mut Ui, icon: Icon, rect: egui::Rect, color: Color32) {
-    let p = ui.painter();
     let c = rect.center();
     let s = rect.height().min(rect.width()) * 0.42; // icon half-size
     let sw = (s * 0.34).clamp(1.8, 3.5);
     let stroke = egui::Stroke::new(sw, color);
     match icon {
         Icon::Prev | Icon::Next => {
-            let dir = if matches!(icon, Icon::Next) { 1.0 } else { -1.0 };
-            tri(
-                ui,
-                c + egui::vec2(dir * s * 0.9, 0.0),
-                s * 0.85,
-                dir * s * 1.6,
-                color,
-            );
+            let d = if matches!(icon, Icon::Next) {
+                egui::vec2(1.0, 0.0)
+            } else {
+                egui::vec2(-1.0, 0.0)
+            };
+            tri(ui, c + d * s * 0.9, d, s * 0.85, s * 1.6, color);
         }
         Icon::DblPrev | Icon::DblNext => {
-            let dir = if matches!(icon, Icon::DblNext) { 1.0 } else { -1.0 };
-            tri(
-                ui,
-                c + egui::vec2(dir * s * 1.35, 0.0),
-                s * 0.75,
-                dir * s * 1.2,
-                color,
-            );
-            tri(
-                ui,
-                c + egui::vec2(dir * s * 0.15, 0.0),
-                s * 0.75,
-                dir * s * 1.2,
-                color,
-            );
+            let d = if matches!(icon, Icon::DblNext) {
+                egui::vec2(1.0, 0.0)
+            } else {
+                egui::vec2(-1.0, 0.0)
+            };
+            tri(ui, c + d * s * 1.35, d, s * 0.72, s * 1.15, color);
+            tri(ui, c + d * s * 0.1, d, s * 0.72, s * 1.15, color);
         }
         Icon::First | Icon::Last => {
-            let dir = if matches!(icon, Icon::Last) { 1.0 } else { -1.0 };
-            // bar on the opposite side of the pointing direction
-            let bar_x = c.x + dir * s * 1.15;
-            p.line_segment(
+            let dx = if matches!(icon, Icon::Last) { 1.0 } else { -1.0 };
+            let d = egui::vec2(dx, 0.0);
+            // bar behind the tip, on the side it points to
+            let bar_x = c.x + dx * s * 1.15;
+            ui.painter().line_segment(
                 [
                     egui::pos2(bar_x, c.y - s * 0.95),
                     egui::pos2(bar_x, c.y + s * 0.95),
                 ],
                 stroke,
             );
-            tri(
-                ui,
-                c + egui::vec2(dir * s * 0.55, 0.0),
-                s * 0.85,
-                dir * s * 1.35,
-                color,
-            );
+            tri(ui, c + d * s * 0.55, d, s * 0.82, s * 1.3, color);
         }
         Icon::Star | Icon::StarFilled => {
             let r_out = s * 1.15;
@@ -114,21 +97,24 @@ pub fn draw(ui: &mut Ui, icon: Icon, rect: egui::Rect, color: Color32) {
             } else {
                 egui::Stroke::new(1.6, color)
             };
-            p.add(egui::Shape::convex_polygon(pts, fill, stroke));
+            ui.painter().add(egui::Shape::convex_polygon(pts, fill, stroke));
         }
         Icon::Download => {
-            // thick shaft + solid arrow head + base line (classic download glyph)
+            // shaft
             ui.painter().line_segment(
-                [c - egui::vec2(0.0, s), c + egui::vec2(0.0, s * 0.30)],
+                [c - egui::vec2(0.0, s), c + egui::vec2(0.0, s * 0.25)],
                 stroke,
             );
+            // solid arrow head pointing DOWN (tip at the bottom)
             tri(
                 ui,
-                c + egui::vec2(0.0, s * 0.85),
-                s * 0.62,
-                -s * 1.05,
+                c + egui::vec2(0.0, s * 0.9),
+                egui::vec2(0.0, 1.0),
+                s * 0.72,
+                s * 1.15,
                 color,
             );
+            // base line
             ui.painter().line_segment(
                 [
                     egui::pos2(c.x - s * 0.95, c.y + s),
@@ -181,7 +167,7 @@ pub fn draw(ui: &mut Ui, icon: Icon, rect: egui::Rect, color: Color32) {
             }
         }
         Icon::Check => {
-            p.add(egui::Shape::line(
+            ui.painter().add(egui::Shape::line(
                 vec![
                     c + egui::vec2(-s * 0.9, s * 0.05),
                     c + egui::vec2(-s * 0.2, s * 0.7),

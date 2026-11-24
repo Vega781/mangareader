@@ -507,12 +507,24 @@ pub fn show(
                         let clicked = match dl_icon {
                             Some(ic) => crate::icons::button_with_text(ui, ic, dl_text, false).clicked(),
                             None => {
-                                ui.spinner();
+                                // live progress of the running download
+                                match dl.progress(id) {
+                                    Some(pr) if pr.total > 0 => {
+                                        ui.add(
+                                            egui::ProgressBar::new(pr.frac())
+                                                .desired_width(130.0)
+                                                .text(format!("{}/{} стр.", pr.done, pr.total)),
+                                        );
+                                    }
+                                    _ => {
+                                        ui.spinner();
+                                    }
+                                }
                                 false
                             }
                         };
                         if clicked && !busy && !got {
-                            dl.start(id, session.manga_id.clone(), data_dir.to_path_buf());
+                            dl.start(id, session.manga_id.clone(), ch.total_pages, data_dir.to_path_buf());
                             (toast)("Загрузка главы началась".to_string(), false);
                         }
                     }

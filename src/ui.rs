@@ -507,7 +507,7 @@ impl App {
             // download-all queue controls (MangaDex only)
             if chapters.iter().any(|c| matches!(c.source, ChapterSource::Mangadex { .. })) {
                 let entry = self.lib.entry(id).cloned();
-                let missing: Vec<(String, String)> = chapters
+                let missing: Vec<(String, u32)> = chapters
                     .iter()
                     .filter_map(|c| match &c.source {
                         ChapterSource::Mangadex { id: cid } => {
@@ -530,7 +530,7 @@ impl App {
                             if downloaded || self.downloads.running(cid) || self.downloads.queued(cid) {
                                 None
                             } else {
-                                Some((cid.clone(), id.to_string()))
+                                Some((cid.clone(), expected))
                             }
                         }
                         _ => None,
@@ -541,15 +541,67 @@ impl App {
                     let queued = self.downloads.pending();
                     if !missing.is_empty() {
                         if ui.button(format!("Скачать всю мангу ({})", missing.len())).clicked() {
-                            for (cid, mid) in &missing {
-                                self.downloads.enqueue(cid.clone(), mid.clone());
+                            for (cid, expected) in &missing {
+                                self.downloads.enqueue(cid.clone(), id.to_string(), *expected);
                             }
                             self.toast(format!("В очередь добавлено глав: {}", missing.len()), false);
                         }
                     }
                     if active + queued > 0 {
-                        ui.spinner();
-                        ui.label(format!("Скачивание: {} сейчас, {} в очереди", active, queued));
+                        ui.vertical(|ui| {
+                            // overall progress: downloaded chapters / all chapters
+                            let total_ch = chapters.len().max(1) as f32;
+                            let done_ch = chapters
+                                .iter()
+                                .filter(|c| match &c.source {
+                                    ChapterSource::Mangadex { id: cid } => {
+                                        crate::downloads::is_complete(&self.data_dir, cid, c.total_pages)
+                                    }
+                                    _ => false,
+                                })
+                                .count() as f32;
+                            ui.add(
+                                egui::ProgressBar::new(done_ch / total_ch)
+                                    .desired_width(320.0)
+                                    .text(format!(
+                                        "Всего: {:.0}% ({} из {} глав)",
+                                        100.0 * done_ch / total_ch,
+                                        done_ch as usize,
+                                        chapters.len()
+                                    )),
+                            );
+                            // current chapter progress
+                            let running: Option<crate::downloads::ChapterProgress> = chapters
+                                .iter()
+                                .find_map(|c| match &c.source {
+                                    ChapterSource::Mangadex { id: cid }
+                                        if self.downloads.running(cid) =>
+                                    {
+                                        self.downloads.progress(cid)
+                                    }
+                                    _ => None,
+                                });
+                            if let Some(pr) = running {
+                                if pr.total > 0 {
+                                    ui.add(
+                                        egui::ProgressBar::new(pr.frac())
+                                            .desired_width(320.0)
+                                            .text(format!(
+                                                "Текущая глава: {} / {} стр.{}",
+                                                pr.done,
+                                                pr.total,
+                                                if pr.failed { " (ошибка сети, повтор…)" } else { "" }
+                                            )),
+                                    );
+                                } else {
+                                    ui.horizontal(|ui| {
+                                        ui.spinner();
+                                        ui.label("Подготовка главы…");
+                                    });
+                                }
+                            }
+                            ui.label(format!("В очереди осталось: {} глав", queued));
+                        });
                         if ui.button("Остановить").clicked() {
                             self.downloads.clear_queue();
                             self.toast("Очередь очищена (текущая глава докачается)".into(), false);
@@ -625,7 +677,18 @@ impl App {
                             let busy = self.downloads.running(cid);
                             let queued = self.downloads.queued(cid);
                             if busy {
-                                ui.spinner();
+                                match self.downloads.progress(cid) {
+                                    Some(pr) if pr.total > 0 => {
+                                        ui.add(
+                                            egui::ProgressBar::new(pr.frac())
+                                                .desired_width(110.0)
+                                                .text(format!("{}/{}", pr.done, pr.total)),
+                                        );
+                                    }
+                                    _ => {
+                                        ui.spinner();
+                                    }
+                                }
                             } else if queued {
                                 ui.label(egui::RichText::new("в очереди").weak());
                             } else if got {
@@ -633,7 +696,7 @@ impl App {
                                     delete_chapter = Some(cid.clone());
                                 }
                             } else if crate::icons::button_sized(ui, crate::icons::Icon::Download, "Скачать главу", 22.0).clicked() {
-                                self.downloads.start(cid, id.to_string(), self.data_dir.clone());
+                                self.downloads.start(cid, id.to_string(), ch.total_pages, self.data_dir.clone());
                                 self.toast("Загрузка главы началась".into(), false);
                             }
                         }
@@ -838,9 +901,10 @@ impl App {
                 ui.add_space(4.0);
                 ui.label(format!("Данные: {}", self.data_dir.display()));
                 ui.label(format!(
-                    "Текстур в памяти: {}  •  Загрузок в процессе: {}",
+                    "Текстур в памяти: {}  •  Загрузок: {} активн., {} в очереди",
                     self.images.len(),
-                    self.downloads.count()
+                    self.downloads.active(),
+                    self.downloads.pending()
                 ));
                 ui.horizontal(|ui| {
                     if ui.button("Очистить кэш картинок (память)").clicked() {
